@@ -26,46 +26,42 @@ class GraphQATool(BaseTool):
         "Analyze the relationships between entities in a financial knowledge graph."
         "The entity types in a financial knowledge graph include company, competitors, financial statements, indicators, stock prices, news, date, and sector."
     )
-    graph: Neo4jGraph
-    llm: ChatOpenAI
+    graph: Optional[Neo4jGraph] = None
+    llm: Optional[ChatOpenAI] = None
     args_schema: Type[BaseModel] = GraphQAToolInput
     return_direct: bool = False
-    chain: GraphCypherQAChain
+    chain: Optional[GraphCypherQAChain] = None
 
     def __init__(self):
-        # Neo4j 그래프 초기화
-        graph = Neo4jGraph(
-            url=os.getenv("NEO4J_URI"),
-            username=os.getenv("NEO4J_USER"),
-            password=os.getenv("NEO4J_PASSWORD"),
-        )
-        
-        # 언어 모델 초기화
-        llm = ChatOpenAI(
-            openai_api_key=os.getenv("OPENAI_API_KEY"), 
-            temperature=0, 
-            model="gpt-4.1"
-        )
+        # 지연 초기화: 연결 실패 시 서버 기동을 막지 않도록 함
+        super().__init__(graph=None, llm=None, chain=None)
 
-        # Cypher QA 체인 구성
+    def _ensure_initialized(self):
+        if self.chain is not None:
+            return
+        uri = os.getenv("NEO4J_URI")
+        user = os.getenv("NEO4J_USER")
+        pwd = os.getenv("NEO4J_PASSWORD")
+        if not uri or not user or not pwd:
+            raise RuntimeError("Neo4j 설정(NEO4J_URI/USER/PASSWORD)이 없습니다.")
+        # Neo4j 그래프 및 체인 초기화 (연결 시도는 여기서 수행)
+        graph = Neo4jGraph(url=uri, username=user, password=pwd)
+        llm = ChatOpenAI(openai_api_key=os.getenv("OPENAI_API_KEY"), temperature=0, model="gpt-4.1")
         chain = GraphCypherQAChain.from_llm(
             llm,
             graph=graph,
             verbose=True,
             return_intermediate_steps=True,
             allow_dangerous_requests=True,
-            schema=custom_schema
+            schema=custom_schema,
         )
-
-        # 부모 클래스 초기화 시 필수 필드 전달
-        super().__init__(
-            graph=graph,
-            llm=llm,
-            chain=chain
-        )
+        self.graph = graph
+        self.llm = llm
+        self.chain = chain
 
     # 답변과 cypher 쿼리를 반환
     def kgqa_chain(self, query: str):
+        self._ensure_initialized()
         output = self.chain.invoke({"query": query}) # 출력
         answer = output.get('result', '') # 답변
 
@@ -92,7 +88,10 @@ class GraphQATool(BaseTool):
                     run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> str:
         """메인 비동기 실행 메서드"""
 
-        result = self.kgqa_chain(query)
+        try:
+            result = self.kgqa_chain(query)
+        except Exception as e:
+            return {"error": f"Neo4j 연결 불가: {str(e)}"}
         
         return result
 
