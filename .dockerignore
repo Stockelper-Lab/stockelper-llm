@@ -63,4 +63,6 @@ test/
 
 # Poetry
 poetry.lock
-pyproject.toml 
+
+# Keep pyproject.toml for uv
+# pyproject.toml 
