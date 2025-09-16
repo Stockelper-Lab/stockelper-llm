@@ -1,9 +1,7 @@
 import os
-import praw
 import asyncio
 from datetime import datetime, timedelta
 from typing import Type, Optional, Dict, List
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
@@ -13,7 +11,7 @@ from langchain_core.callbacks import (
 )
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
-from pymongo import AsyncMongoClient
+from motor.motor_asyncio import AsyncIOMotorClient
 import json
 import dotenv
 
@@ -111,7 +109,7 @@ class ReportSentimentAnalysisTool(BaseSentimentAnalysisTool):
         end_date = datetime.now()
         start_date = (end_date - timedelta(days=days)).strftime("%Y/%m/%d")
         
-        mongo_client = AsyncMongoClient(os.getenv("MONGO_URI"))
+        mongo_client = AsyncIOMotorClient(os.getenv("MONGO_URI"))
         collection = mongo_client['stockelper']['report']
         
         data = []
