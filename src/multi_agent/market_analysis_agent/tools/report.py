@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import Type, Optional
 from datetime import datetime, timedelta
-from pymongo import AsyncMongoClient
+from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from langchain_core.callbacks import (
@@ -40,7 +40,7 @@ class SearchReportTool(BaseTool):
     three_ago: object = datetime.today() - timedelta(3)
 
     def __init__(self):
-        mongo_client = AsyncMongoClient(os.environ["MONGO_URI"])
+        mongo_client = AsyncIOMotorClient(os.environ["MONGO_URI"])
         mongo_db = mongo_client["stockelper"]
         mongo_collection = mongo_db["report"]
         super().__init__(mongo_collection=mongo_collection)
@@ -78,4 +78,3 @@ class SearchReportTool(BaseTool):
             )
 
         return observation
-

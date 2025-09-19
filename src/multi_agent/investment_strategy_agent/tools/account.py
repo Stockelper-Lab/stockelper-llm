@@ -32,8 +32,8 @@ class GetAccountInfoTool(BaseTool):
     
     def _create_table_if_not_exists(self, async_database_url: str):
         """users 테이블이 존재하지 않으면 생성 (동기 방식)"""
-        # 비동기 URL을 동기 URL로 변환
-        sync_database_url = async_database_url.replace('+asyncpg', '').replace('postgresql+asyncpg', 'postgresql')
+        # 비동기 URL을 동기 URL로 변환 (psycopg3 사용)
+        sync_database_url = async_database_url.replace('+asyncpg', '+psycopg').replace('postgresql+asyncpg', 'postgresql+psycopg')
         
         # 동기 엔진으로 테이블 생성
         sync_engine = create_engine(sync_database_url, echo=False)

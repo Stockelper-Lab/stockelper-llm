@@ -1,13 +1,10 @@
 import os
 from typing import Type, Optional, ClassVar
 from langchain_core.tools import BaseTool
-from langchain_milvus import Milvus
 from langchain_core.callbacks import (
     AsyncCallbackManagerForToolRun,
     CallbackManagerForToolRun,
 )
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.vectorstores import VectorStore
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
