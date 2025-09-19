@@ -167,18 +167,35 @@ class AnalysisFinancialStatementTool(BaseTool):
         current_year = datetime.now().year
         financial_statement_all = None
 
+        # 종목코드 형식 확인 및 변환
+        if len(stock_code) != 6 or not stock_code.isdigit():
+            return {"error": f"잘못된 종목코드 형식입니다: {stock_code}. 6자리 숫자여야 합니다."}
+
         for offset in range(5):
             year = current_year - offset
-            df = self.dart.finstate_all(stock_code, year)
-            if df is not None and not df.empty:
-                financial_statement_all = df
-                break
+            try:
+                print(f"DART API 조회 시도: 종목코드={stock_code}, 연도={year}")
+                df = self.dart.finstate_all(stock_code, year)
+                
+                if df is not None and not df.empty:
+                    print(f"재무제표 데이터 발견: {year}년, 행수={len(df)}")
+                    financial_statement_all = df
+                    break
+                else:
+                    print(f"{year}년 데이터 없음")
+                    
+            except Exception as e:
+                print(f"DART API 오류 ({year}년): {str(e)}")
+                continue
 
         if financial_statement_all is None or financial_statement_all.empty:
-            return {"error": "최근 5년 내 재무제표를 찾지 못했습니다."}
+            return {"error": f"종목코드 {stock_code}의 최근 5년 내 재무제표를 찾지 못했습니다. DART에 등록된 종목인지 확인해주세요."}
 
-        analysis_result = self.calculater(financial_statement_all)
-        return analysis_result
+        try:
+            analysis_result = self.calculater(financial_statement_all)
+            return analysis_result
+        except Exception as e:
+            return {"error": f"재무제표 분석 중 오류 발생: {str(e)}"}
 
     async def _arun(
         self,

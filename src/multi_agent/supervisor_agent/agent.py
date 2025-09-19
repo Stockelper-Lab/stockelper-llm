@@ -233,7 +233,7 @@ class SupervisorAgent:
         driver = GraphDatabase.driver(os.getenv("NEO4J_URI"), auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD")))
         
         query = """
-        MATCH (c:Company {stock_name: $stock_name})
+        MATCH (c:Company {stock_nm: $stock_name})
         CALL {
             WITH c
             MATCH (c)-[r]->(n)
@@ -242,20 +242,20 @@ class SupervisorAgent:
                 node_type: labels(n)[0],
                 properties: properties(n),
                 node_name: CASE 
-                    WHEN labels(n)[0] = 'Company' THEN n.stock_name
-                    WHEN labels(n)[0] = 'Sector' THEN n.sector
+                    WHEN labels(n)[0] = 'Company' THEN n.stock_nm
+                    WHEN labels(n)[0] = 'Sector' THEN n.stock_sector_nm
                 END
             }) as nodes,
             collect({
                 start: {
-                    name: c.stock_name,
+                    name: c.stock_nm,
                     type: labels(c)[0]
                 },
                 relationship: type(r),
                 end: {
                     name: CASE 
-                        WHEN type(r) = 'HAS_COMPETITOR' THEN n.stock_name
-                        WHEN type(r) = 'BELONGS_TO' THEN n.sector
+                        WHEN type(r) = 'HAS_COMPETITOR' THEN n.stock_nm
+                        WHEN type(r) = 'BELONGS_TO' THEN n.stock_sector_nm
                     END,
                     type: labels(n)[0]
                 }
@@ -265,7 +265,7 @@ class SupervisorAgent:
         RETURN nodes + [{
             node_type: labels(c)[0],
             properties: properties(c),
-            node_name: c.stock_name
+            node_name: c.stock_nm
         }] as nodes,
         relations as relations
         """

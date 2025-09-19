@@ -100,19 +100,17 @@ class GraphQATool(BaseTool):
 custom_schema = """
 Node types:
 - Company
-    - stock_name: 회사의 이름 (예: SK하이닉스)
+    - stock_nm: 회사의 이름 (예: SK하이닉스)
     - stock_code: 회사의 종목코드 (예: 000660)
-    - product: 회사의 제품 (예: 반도체)
-    - listing_date: 회사의 상장일 (예: 2021-03-01)
-    - settlement_month: 회사의 정산월 (예: 2021-03)
-    - leader_name: 회사의 리더 (예: 이영표)
-    - homepage: 회사의 홈페이지 (예: https://www.skhynix.com)
-    - region: 회사의 지역 (예: 미국)
-    - marcap: 회사의 시가총액 (예: 100000000000)
-    - stock_cnt: 회사의 주식 수 (예: 100000000000)
-    - market: 회사의 시장 (예: 코스피)
+    - stock_abbrv: 회사의 약어 (예: SK하이닉스)
+    - stock_nm_eng: 회사의 영문명 (예: SK Hynix Inc.)
+    - listing_dt: 회사의 상장일 (예: 2021-03-01)
+    - capital_stock: 회사의 자본금 (예: 100000000000)
+    - outstanding_shares: 발행주식수 (예: 100000000000)
+    - kospi200_item_yn: 코스피200 편입여부 (예: Y/N)
+    - market_nm: 회사의 시장 (예: 코스피)
 - Sector
-    - sector: 회사의 업종 (예: 반도체)
+    - stock_sector_nm: 회사의 업종 (예: 반도체)
 - StockPrice
     - date: 날짜 (예: 2021-03-01)
     - open: 시가 (예: 100000000000)
@@ -141,7 +139,7 @@ Node types:
     - date: 뉴스의 날짜 (예: 2021-03-01)
     - title: 뉴스의 제목 (예: "SK하이닉스, 영업이익 증가")
     - body: 뉴스의 본문 (예: "SK하이닉스는 영업이익을 증가시켰습니다.")
-    - stock_name: 뉴스의 종목명 (예: "SK하이닉스")
+    - stock_nm: 뉴스의 종목명 (예: "SK하이닉스")
 
 Relationships:
 - (Company)-[:HAS_STOCK_PRICE]->(StockPrice)
