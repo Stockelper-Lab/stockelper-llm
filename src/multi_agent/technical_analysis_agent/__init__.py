@@ -5,7 +5,7 @@ from .tools import *
 
 
 agent = TechnicalAnalysisAgent(
-    model="gpt-4o-mini",
+    model="gpt-4.1-mini",
     tools=[
         AnalysisStockTool(async_database_url=os.environ["ASYNC_DATABASE_URL"]),
         PredictStockTool(),

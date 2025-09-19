@@ -59,8 +59,8 @@ class BaseSentimentAnalysisTool(BaseTool):
 
     def __init__(self):
         super().__init__(
-            sentiment_analysis_llm=ChatOpenAI(model="gpt-4o-mini", temperature=0.0),
-            trend_analysis_llm=ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
+            sentiment_analysis_llm=ChatOpenAI(model="gpt-4.1-mini", temperature=0.0),
+            trend_analysis_llm=ChatOpenAI(model="gpt-4.1-mini", temperature=0.1)
         )
 
     async def analyze_sentiments_batch(self, texts: List[Dict]) -> List[Dict]:

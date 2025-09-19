@@ -7,7 +7,7 @@ from .portfolio_analysis_agent import agent as portfolio_analysis_agent
 from .supervisor_agent import SupervisorAgent
 
 multi_agent = SupervisorAgent(
-    model="gpt-4o-mini",
+    model="gpt-4.1-mini",
     agents=[
         market_analysis_agent,
         fundamental_analysis_agent,

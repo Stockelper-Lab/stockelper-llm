@@ -99,11 +99,11 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
 
         return StreamingResponse(
             generate_sse_response(multi_agent, input_state, user_id, thread_id),
-            media_type="text/event-stream; charset=utf-8",
+            media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "Content-Type": "text/event-stream; charset=utf-8",
+                "Content-Type": "text/event-stream",
             }
         )
 
@@ -124,10 +124,10 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
         
         return StreamingResponse(
             error_stream(),
-            media_type="text/event-stream; charset=utf-8",
+            media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "Content-Type": "text/event-stream; charset=utf-8",
+                "Content-Type": "text/event-stream",
             }
         ) 
