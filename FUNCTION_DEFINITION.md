@@ -166,7 +166,6 @@
 | PostgreSQL | 사용자 정보, 체크포인트 | `users`, `checkpoints` | 100 TPS | 일 1회 |
 | Neo4j | 지식그래프 | `Company`, `Sector` | 50 QPS | 주 1회 |
 | MongoDB | 문서 저장 | `reports`, `news` | 200 QPS | 일 1회 |
-| Milvus | 벡터 검색 | `embeddings` | 1000 QPS | 주 1회 |
 
 ### F4.2 외부 API 연동
 

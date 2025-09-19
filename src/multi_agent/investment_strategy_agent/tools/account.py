@@ -1,7 +1,6 @@
 import os
 from typing import Type, Optional
 from langchain_core.tools import BaseTool
-from langchain_milvus import Milvus
 from langchain_core.callbacks import (
     AsyncCallbackManagerForToolRun,
     CallbackManagerForToolRun,

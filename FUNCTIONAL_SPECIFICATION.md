@@ -226,7 +226,6 @@ KIS_ACCOUNT_NO=...                      # 모의투자 계좌번호
 - **PostgreSQL 15+**
 - **Neo4j 5.0+**
 - **MongoDB 6.0+**
-- **Milvus 2.3+**
 
 ---
 

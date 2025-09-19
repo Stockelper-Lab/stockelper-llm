@@ -2,10 +2,8 @@ fastapi==0.111.0
 langgraph
 langchain-community
 langchain-openai
-langchain-milvus==0.1.10
 langchain-huggingface
 langfuse
-pymilvus==2.5.8
 pymongo
 lancedb
 FlagEmbedding
