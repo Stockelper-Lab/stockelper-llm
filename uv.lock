@@ -3818,7 +3818,6 @@ requires-dist = [
     { name = "plotly" },
     { name = "prophet" },
     { name = "prophet", marker = "extra == 'ml'" },
-    { name = "psycopg", extras = ["binary"] },
     { name = "psycopg", extras = ["binary"], specifier = "==3.2.*" },
     { name = "pymilvus", specifier = "==2.5.8" },
     { name = "pymilvus", marker = "extra == 'ml'", specifier = "==2.5.8" },

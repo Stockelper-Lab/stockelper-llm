@@ -32,4 +32,5 @@ psycopg-pool
 psycopg[binary,pool]
 langgraph-checkpoint-postgres
 langchain-neo4j
+neo4j
 mojito2
