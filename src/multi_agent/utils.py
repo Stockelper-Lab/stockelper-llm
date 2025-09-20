@@ -52,8 +52,12 @@ async def update_user_kis_credentials(async_engine: object, user_id: int, access
         stmt = select(User).where(User.id == user_id)
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
+        if user is None:
+            # 사용자 없음: 업데이트 불가
+            return False
         user.kis_access_token = access_token
         await session.commit()
+        return True
 
 
 async def get_access_token(app_key, app_secret):
@@ -185,19 +189,38 @@ def place_order(stock_code:str, order_side:str, order_type:str, order_price:floa
         "PDNO": stock_code,
         "ORD_DVSN": order_dvsn,  # 00: 지정가 / 01: 시장가
         "ORD_QTY": str(order_quantity),  # 주문수량
-        "ORD_UNPR": str(order_price) if isinstance(order_price, int) else "0",  # 주문 단가 
+        # 시장가 주문은 0, 지정가는 전달된 가격을 문자열로
+        "ORD_UNPR": "0" if order_dvsn == "01" else str(order_price),
     }
+
+    # hashkey 생성 (주문 엔드포인트 필수)
+    try:
+        hashkey = get_hashkey(kis_app_key, kis_app_secret, body, "https://openapivts.koreainvestment.com:29443")
+    except Exception as e:
+        return f"hashkey 생성 실패: {str(e)}"
 
     headers = {
         "Content-Type": "application/json",
         "authorization": f"Bearer {kis_access_token}",
-        "appKey": kis_app_key,
-        "appSecret": kis_app_secret,
+        "appkey": kis_app_key,
+        "appsecret": kis_app_secret,
         "tr_id": tr_id,  # 모의투자 매수 - VTTC0802U / 모의투자 매도 - VTTC0011U
-        "custtype": "P"
+        "custtype": "P",
+        "hashkey": hashkey,
     }
-    res = requests.post(url, headers=headers, data=json.dumps(body))
-    return res.json()['msg1']
+    try:
+        res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30)
+        res.raise_for_status()
+        data = res.json()
+        # 표준 메시지 우선 반환하되, 없으면 전체 응답 반환
+        return data.get('msg1', data)
+    except Exception as e:
+        try:
+            # 가능한 경우 서버 메시지 노출
+            data = res.json()
+            return data.get('msg1', str(e))
+        except Exception:
+            return f"주문 요청 실패: {str(e)}"
     
 
 def custom_add_messages(existing: list, update: list):

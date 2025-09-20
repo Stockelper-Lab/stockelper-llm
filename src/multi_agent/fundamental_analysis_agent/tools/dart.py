@@ -27,10 +27,11 @@ class AnalysisFinancialStatementTool(BaseTool):
     args_schema: Type[BaseModel] = AnalysisFinancialStatementInput
     return_direct: bool = False
 
-    dart: object
+    dart: object = None
 
     def __init__(self):
-        super().__init__(dart=OpenDartReader(os.environ["OPEN_DART_API_KEY"]))
+        # 지연 초기화: 실제 호출 시점에 Reader 생성
+        super().__init__(dart=None)
 
     def calculater(self, financial_statement_all):
 
@@ -164,6 +165,16 @@ class AnalysisFinancialStatementTool(BaseTool):
     def _run(
         self, stock_code: str, config: RunnableConfig, run_manager: Optional[CallbackManagerForToolRun] = None
     ):
+        # DART 클라이언트 지연 초기화 및 키 검증
+        if self.dart is None:
+            api_key = os.getenv("OPEN_DART_API_KEY")
+            if not api_key:
+                return {"error": "OPEN_DART_API_KEY 환경변수가 설정되어 있지 않습니다."}
+            try:
+                self.dart = OpenDartReader(api_key)
+            except Exception as e:
+                return {"error": f"DART 클라이언트 생성 실패: {str(e)}"}
+
         current_year = datetime.now().year
         financial_statement_all = None
 

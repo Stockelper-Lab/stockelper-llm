@@ -185,7 +185,7 @@ class SupervisorAgent:
                 kwargs = state.trading_action | user_info
 
                 trading_result = place_order(**kwargs)
-                if "기간이 만료된 token" in trading_result:
+                if isinstance(trading_result, str) and ("기간이 만료된 token" in trading_result or "유효하지 않은 token" in trading_result):
                     kwargs['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
                     trading_result = place_order(**kwargs)

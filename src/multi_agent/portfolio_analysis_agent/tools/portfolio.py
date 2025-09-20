@@ -73,7 +73,7 @@ class PortfolioAnalysisTool(BaseTool):
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 
@@ -109,7 +109,7 @@ class PortfolioAnalysisTool(BaseTool):
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 

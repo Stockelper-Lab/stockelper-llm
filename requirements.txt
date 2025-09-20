@@ -18,15 +18,10 @@ opendartreader
 prophet
 plotly
 statsmodels
-prophet
-statsmodels
-plotly
 motor
 youtube-transcript-api
 google-api-python-client
-psycopg2-binary
 asyncpg
-psycopg-pool
 psycopg[binary,pool]
 langgraph-checkpoint-postgres
 langchain-neo4j

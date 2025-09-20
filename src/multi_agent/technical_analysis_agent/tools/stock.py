@@ -80,7 +80,8 @@ class AnalysisStockTool(BaseTool):
                     status_code = res.status
                     res_body = await res.json()
 
-                    if status_code == 500 and "유효하지 않은 token" in res_body['msg1']:
+                    msg = res_body.get('msg1', '') if isinstance(res_body, dict) else str(res_body)
+                    if status_code in (401, 403, 500) and ("유효하지 않은 token" in msg or "기간이 만료된 token" in msg):
                         user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                         update_access_token_flag = True
 
