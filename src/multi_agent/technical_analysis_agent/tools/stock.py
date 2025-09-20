@@ -213,8 +213,17 @@ class PredictStockTool(BaseTool):
     def ensemble_prediction(self, stock_code: str, periods: int = 365):
         """Prophet과 ARIMA의 앙상블 예측"""
 
-        df = fdr.DataReader(f"KRX:{stock_code}", "2023")["Change"]
-        df = df.reset_index()
+        # 전체 시계열 불러오기 (OHLCV)
+        df_all = fdr.DataReader(f"KRX:{stock_code}", "2023")
+        # Change 컬럼이 없는 경우 Close 기준으로 생성
+        if "Change" not in df_all.columns:
+            base_col = "Close" if "Close" in df_all.columns else ("Adj Close" if "Adj Close" in df_all.columns else None)
+            if base_col is None:
+                raise ValueError("시계열 데이터에 Close/Adj Close 컬럼이 없어 Change 계산이 불가합니다.")
+            df_all["Change"] = df_all[base_col].pct_change().fillna(0)
+
+        # Prophet/ARIMA에 필요한 컬럼만 사용하고 인덱스를 컬럼으로
+        df = df_all[["Change"]].reset_index()  # reset_index 후 날짜 컬럼은 'Date'
 
         prophet_changes = self.predict_with_prophet(df, periods)
         arima_changes = self.predict_with_arima(df, periods)
