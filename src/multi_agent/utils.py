@@ -72,7 +72,8 @@ async def get_access_token(app_key, app_secret):
         "appsecret": app_secret
     }
     
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, headers=headers, json=body) as res:
             if res.status == 200:
                 token_data = await res.json()
@@ -108,7 +109,8 @@ async def check_account_balance(app_key, app_secret, access_token, account_no):
         "CTX_AREA_NK100": ""  # 연속조회검색키100
     }
     
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         try:
             async with session.get(url, headers=headers, params=params, timeout=30) as res:
                 if res.status == 200:
