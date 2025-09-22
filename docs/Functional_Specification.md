@@ -29,6 +29,10 @@
                                             거래 제안 → 인간 승인 → 실제 거래
 ```
 
+#### 🔧 에이전트 초기화와 의존성 주입(DI)
+- 에이전트는 애플리케이션 import 시점이 아니라, 요청 처리 시점에 `get_multi_agent(async_database_url)`로 생성됩니다.
+- 최초 1회 생성 후 캐시되어 재사용되며, `ASYNC_DATABASE_URL`이 필수로 주입됩니다.
+
 #### 📊 상태 관리
 - `messages`: 대화 히스토리
 - `query`: 현재 사용자 질문
@@ -68,7 +72,7 @@
 #### 📌 주요 기능
 - **차트 패턴 분석**: 멀티모달 AI를 활용한 차트 이미지 분석
 - **기술적 지표 계산**: RSI, MACD, 볼린저밴드 등 주요 지표 분석
-- **주가 예측**: Prophet, ARIMA 모델을 활용한 단기 주가 예측
+- **주가 예측**: Prophet, ARIMA 모델을 활용한 단기 주가 예측 (FDR에 Change 컬럼이 없을 경우 Close 기반 pct_change로 자동 생성)
 - **매매 타이밍**: 기술적 분석 기반 매수/매도 시점 추천
 
 #### 🛠️ 사용 도구
@@ -91,7 +95,7 @@
 
 #### 📌 주요 기능
 - **개인화 전략**: 사용자 리스크 프로파일 기반 맞춤 전략 수립
-- **거래 실행**: KIS API 연동을 통한 실제 매매 주문
+- **거래 실행**: KIS API 연동을 통한 실제 매매 주문 (hashkey 헤더 포함, 헤더 키 통일)
 - **계정 관리**: 사용자 투자 계정 정보 조회 및 관리
 - **전략 검색**: 시장 상황에 맞는 투자 전략 검색 및 추천
 
@@ -136,6 +140,11 @@ data: {"type": "progress", "step": "SearchNewsTool", "status": "start"}
 data: {"type": "final", "message": "분석 결과...", "subgraph": {...}, "trading_action": {...}}
 data: [DONE]
 ```
+
+요청 처리 시 내부 동작 요약
+- PostgreSQL 체크포인터로 LangGraph 상태를 저장/복구합니다.
+- 멀티에이전트는 `get_multi_agent(os.getenv("ASYNC_DATABASE_URL"))`로 획득합니다.
+- 각 에이전트/도구 실행 상황은 `progress` 이벤트로 스트리밍됩니다.
 
 #### 2. 기본 상태 확인 API
 
@@ -205,7 +214,7 @@ OPENAI_API_KEY=sk-...                   # OpenAI GPT 모델
 OPENROUTER_API_KEY=sk-...               # Perplexity API
 
 # 데이터베이스
-ASYNC_DATABASE_URL=postgresql+asyncpg://...
+ASYNC_DATABASE_URL=postgresql+asyncpg://...  # 에이전트 DI에 주입
 CHECKPOINT_DATABASE_URI=postgresql://...
 MONGO_URI=mongodb://...
 NEO4J_URI=bolt://localhost:7687
@@ -219,6 +228,14 @@ KIS_APP_KEY=...                         # 한국투자증권 앱 키
 KIS_APP_SECRET=...                      # 한국투자증권 앱 시크릿
 KIS_ACCOUNT_NO=...                      # 모의투자 계좌번호
 ```
+
+### 운영 안정성(최근 반영)
+- 주문 API: `hashkey` 헤더 추가 및 `appkey/appsecret` 통일
+- 토큰 만료: “유효하지 않은 token” / “기간이 만료된 token” 모두 인식
+- 타임아웃: aiohttp `ClientTimeout(total=30)` 적용
+- 지연 초기화: Mongo/DART 클라이언트는 실제 호출 시 생성
+- 데이터 보강: FDR Change 컬럼 자동 생성
+- 캐싱: KRX 상장 목록 1회 로드/캐시
 
 ### 시스템 의존성
 - **Python 3.11+**

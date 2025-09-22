@@ -7,6 +7,11 @@
 - **포트**: 21009
 - **CORS**: 모든 오리진 허용 (`allow_origins=["*"]`)
 
+### 1-1. 에이전트 초기화(의존성 주입, DI)
+- 애플리케이션 기동 시 환경변수 강제 접근을 피하고, 요청 처리 시점에 멀티에이전트를 구성합니다.
+- `multi_agent.get_multi_agent(async_database_url)`을 통해 최초 1회 생성/캐시하여 재사용합니다.
+- 이때 `ASYNC_DATABASE_URL`은 필수이며, 기술/전략 에이전트에 주입됩니다.
+
 ### 2. 라우터 구조
 ```
 /routers/
@@ -95,6 +100,7 @@ async with AsyncConnectionPool(conninfo=CHECKPOINT_DATABASE_URI) as pool:
 ### 2. LangGraph 통합
 ```python
 # 멀티에이전트 시스템과 체크포인터 연결
+multi_agent = get_multi_agent(async_db_url)
 multi_agent.checkpointer = checkpointer
 async for response_type, response in multi_agent.astream(...)
 ```
@@ -153,6 +159,13 @@ sequenceDiagram
 - 에러 발생 시에도 SSE 형태로 일관된 응답
 - 상세한 에러 메시지와 스택 트레이스 제공
 
+### ✅ 운영 안정성 개선 포인트(최근 반영)
+- 주문 API에 `hashkey` 필수 헤더 적용 및 헤더 키(appkey/appsecret) 통일
+- KIS 토큰 만료 판별 문자열 표준화(“유효하지 않은 token”/“기간이 만료된 token” 모두 처리)
+- 외부 I/O 타임아웃 기본 30초 적용(aiohttp ClientTimeout)
+- Mongo/DART 클라이언트 지연 초기화로 import 단계 실패 방지
+- FDR 데이터에 Change 컬럼이 없을 때 Close 기준 pct_change 생성
+
 ### ✅ 확장성
 - 비동기 처리로 높은 동시성
 - 커넥션 풀링으로 효율적인 DB 연결 관리
@@ -190,6 +203,7 @@ async def health_check():
 ### `/routers/stock.py`
 - **generate_sse_response()**: SSE 응답 생성기
 - **stock_chat()**: 메인 채팅 엔드포인트
+  - 멀티에이전트는 `get_multi_agent(os.getenv("ASYNC_DATABASE_URL"))`로 지연 생성/캐시
 
 ---
 
