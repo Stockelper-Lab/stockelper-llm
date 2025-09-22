@@ -24,6 +24,7 @@ dependencies = [
     "langgraph-checkpoint-postgres",
     "langchain-openai",
     "langchain-community",
+    "langchain-neo4j",
     "neo4j",
     "pymongo",
     "motor",

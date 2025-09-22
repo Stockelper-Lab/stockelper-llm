@@ -4,8 +4,7 @@ import asyncio
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from typing import Type
-from langchain_community.graphs import Neo4jGraph
-from langchain.chains import GraphCypherQAChain
+from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import (
     AsyncCallbackManagerForToolRun,

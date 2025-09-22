@@ -113,7 +113,7 @@ docker compose up --build -d
 
 ### 모의투자 계정 업로드
 ```bash
-docker compose exec llm-server python src/upload_user.py
+docker compose exec llm-server uv run python src/upload_user.py
 ```
 
 ### 프론트엔드 실행 (테스트용)
