@@ -62,12 +62,26 @@ async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
                     yield f"data: {json.dumps(streaming_response.model_dump(), ensure_ascii=False)}\n\n"
                     
                 elif response_type == "values":
+                    # 최종 메시지를 토큰 단위(delta)로 스트리밍 후 마지막에 final 전송
+                    message_text = response.get("messages", [{}])[-1].content
+                    if isinstance(message_text, str):
+                        # 한글 문자 단위 대신 단어 단위로 스트리밍
+                        import re
+                        # 한글, 영문, 숫자, 공백, 특수문자를 적절히 분리
+                        tokens = re.findall(r'[\w가-힣]+|[^\w가-힣\s]|\s+', message_text)
+                        for token in tokens:
+                            if token.strip():  # 빈 토큰 제외
+                                yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
+                    else:
+                        message_text = ""
+
                     final_response = FinalResponse(
                         type="final",
-                        message=response.get("messages", [{}])[-1].content,
+                        message=message_text,
                         subgraph=response.get("subgraph", {}),
                         trading_action=response.get("trading_action")
                     )
+            # 최종 응답과 종료 신호 전송
             yield f"data: {json.dumps(final_response.model_dump(), ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         
@@ -102,11 +116,12 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
 
         return StreamingResponse(
             generate_sse_response(multi_agent, input_state, user_id, thread_id),
-            media_type="text/event-stream",
+            media_type="text/event-stream; charset=utf-8",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "Content-Type": "text/event-stream",
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "X-Accel-Buffering": "no",
             }
         )
 
@@ -127,10 +142,11 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
         
         return StreamingResponse(
             error_stream(),
-            media_type="text/event-stream",
+            media_type="text/event-stream; charset=utf-8",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "Content-Type": "text/event-stream",
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "X-Accel-Buffering": "no",
             }
         ) 
