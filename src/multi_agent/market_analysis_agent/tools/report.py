@@ -40,10 +40,8 @@ class SearchReportTool(BaseTool):
     three_ago: object = datetime.today() - timedelta(3)
 
     def __init__(self):
-        mongo_client = AsyncIOMotorClient(os.environ["MONGO_URI"])
-        mongo_db = mongo_client["stockelper"]
-        mongo_collection = mongo_db["report"]
-        super().__init__(mongo_collection=mongo_collection)
+        # 지연 초기화: 실제 사용 시점에 연결 생성
+        super().__init__(mongo_collection=None)
 
     def _run(
         self,
@@ -59,6 +57,14 @@ class SearchReportTool(BaseTool):
         config: RunnableConfig = None,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
     ):
+        # 최초 호출 시 Mongo 연결 생성
+        if self.mongo_collection is None:
+            mongo_uri = os.getenv("MONGO_URI")
+            if not mongo_uri:
+                return {"error": "MONGO_URI 환경변수가 설정되어 있지 않습니다."}
+            mongo_client = AsyncIOMotorClient(mongo_uri)
+            mongo_db = mongo_client["stockelper"]
+            self.mongo_collection = mongo_db["report"]
         documents = []
         async for doc in self.mongo_collection.find({"company": company_name}).sort("date", -1):
             documents.append(doc)

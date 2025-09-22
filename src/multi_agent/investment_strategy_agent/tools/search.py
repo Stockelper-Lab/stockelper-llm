@@ -42,6 +42,8 @@ class InvestmentStrategySearchTool(BaseTool):
         config: RunnableConfig,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
     ):
+        if not os.getenv("OPENROUTER_API_KEY"):
+            return {"error": "OPENROUTER_API_KEY 환경변수가 설정되어 있지 않습니다."}
         response = await self.llm.ainvoke(query)
 
         return response.content

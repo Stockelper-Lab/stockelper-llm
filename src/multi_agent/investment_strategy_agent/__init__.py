@@ -1,14 +1,17 @@
-import os
 from .agent import InvestmentStrategyAgent
 from .prompt import SYSTEM_TEMPLATE
 from .tools import *
 
-agent = InvestmentStrategyAgent(
-    model="gpt-4o-mini",
-    tools=[
-        GetAccountInfoTool(async_database_url=os.environ["ASYNC_DATABASE_URL"]),
-        InvestmentStrategySearchTool(),
-    ],
-    system=SYSTEM_TEMPLATE,
-    name="InvestmentStrategyAgent",
-)
+
+def build_agent(async_database_url: str):
+    if not async_database_url:
+        raise ValueError("async_database_url 가 필요합니다.")
+    return InvestmentStrategyAgent(
+        model="gpt-4.1-mini",
+        tools=[
+            GetAccountInfoTool(async_database_url=async_database_url),
+            InvestmentStrategySearchTool(),
+        ],
+        system=SYSTEM_TEMPLATE,
+        name="InvestmentStrategyAgent",
+    )

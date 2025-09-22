@@ -14,6 +14,7 @@ from langgraph.graph import StateGraph
 from langgraph.config import get_stream_writer
 from langchain_openai import ChatOpenAI
 from neo4j import GraphDatabase
+import functools
 from sqlalchemy.ext.asyncio import create_async_engine
 from .prompt import SYSTEM_TEMPLATE, TRADING_SYSTEM_TEMPLATE, STOCK_NAME_USER_TEMPLATE, STOCK_CODE_USER_TEMPLATE
 from ..utils import place_order, get_user_kis_credentials, get_access_token, update_user_kis_credentials, custom_add_messages
@@ -185,9 +186,11 @@ class SupervisorAgent:
                 kwargs = state.trading_action | user_info
 
                 trading_result = place_order(**kwargs)
-                if "기간이 만료된 token" in trading_result:
+                if isinstance(trading_result, str) and ("기간이 만료된 token" in trading_result or "유효하지 않은 token" in trading_result):
                     kwargs['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
+                    # 최신 토큰을 user_info에도 반영
+                    user_info['kis_access_token'] = kwargs['kis_access_token']
                     trading_result = place_order(**kwargs)
 
                 if update_access_token_flag:
@@ -357,20 +360,30 @@ class SupervisorAgent:
                 goto = "execute_agent"
         return update, goto
     
+_STOCK_LISTING_CACHE = None
+
+
+def _get_stock_listing_map():
+    global _STOCK_LISTING_CACHE
+    if _STOCK_LISTING_CACHE is None:
+        stock_df = fdr.StockListing('KRX')
+        _STOCK_LISTING_CACHE = dict(zip(stock_df['Name'], stock_df['Code']))
+    return _STOCK_LISTING_CACHE
+
+
 def find_similar_companies(company_name: str, top_n: int = 10):
-    stock_df = fdr.StockListing('KRX')
-    map_stock_code = dict(zip(stock_df['Name'], stock_df['Code']))
-    
+    map_stock_code = _get_stock_listing_map()
+
     similarities = []
     for name in map_stock_code.keys():
         ratio = difflib.SequenceMatcher(None, company_name, name).ratio()
         similarities.append((name, ratio))
-    
+
     similarities.sort(key=lambda x: x[1], reverse=True)
     top_companies = similarities[:top_n]
-    
+
     result = {}
     for name, _ in top_companies:
         result[name] = map_stock_code[name]
-    
-    return result 
+
+    return result

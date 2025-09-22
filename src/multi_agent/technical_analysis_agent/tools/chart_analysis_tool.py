@@ -323,8 +323,8 @@ class StockChartAnalysisTool(BaseTool):
 
     def __init__(self, async_database_url: str):
         llm = ChatOpenAI(
-            model="gpt-4o",
-            max_tokens=1000,
+            model="gpt-4.1-mini",
+            max_tokens=32768,
             temperature=0
         ) 
         super().__init__(

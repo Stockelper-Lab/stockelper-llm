@@ -122,18 +122,7 @@ class StockChatApp:
                         try:
                             json_data = json.loads(data_content)
                             
-                            # 메시지 내 한글 디코딩 시도
-                            if json_data.get("message"):
-                                message = json_data.get("message")
-                                try:
-                                    # 깨진 UTF-8을 다시 디코딩 시도
-                                    if isinstance(message, str) and any(ord(c) > 127 for c in message):
-                                        # Latin-1로 인코딩 후 UTF-8로 디코딩
-                                        message = message.encode('latin-1').decode('utf-8')
-                                        json_data["message"] = message
-                                        print(f"메시지 디코딩 성공: {message}")
-                                except (UnicodeDecodeError, UnicodeEncodeError) as e:
-                                    print(f"메시지 디코딩 실패: {e}")
+                            # 서버는 UTF-8 JSON을 전송하므로 추가 재디코딩은 수행하지 않음
                             
                             if json_data.get("type") == "final":
                                 # final 메시지

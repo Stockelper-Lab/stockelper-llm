@@ -45,7 +45,7 @@ class GraphQATool(BaseTool):
             raise RuntimeError("Neo4j 설정(NEO4J_URI/USER/PASSWORD)이 없습니다.")
         # Neo4j 그래프 및 체인 초기화 (연결 시도는 여기서 수행)
         graph = Neo4jGraph(url=uri, username=user, password=pwd)
-        llm = ChatOpenAI(openai_api_key=os.getenv("OPENAI_API_KEY"), temperature=0, model="gpt-4.1")
+        llm = ChatOpenAI(openai_api_key=os.getenv("OPENAI_API_KEY"), temperature=0, model="gpt-4.1-mini")
         chain = GraphCypherQAChain.from_llm(
             llm,
             graph=graph,

@@ -3,7 +3,7 @@ from .prompt import SYSTEM_TEMPLATE
 from .tools import *
 
 agent = PortfolioAnalysisAgent(
-    model="gpt-4o-mini",
+    model="gpt-4.1-mini",
     tools=[
         PortfolioAnalysisTool(),
     ],

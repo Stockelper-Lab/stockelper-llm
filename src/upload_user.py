@@ -1,28 +1,16 @@
 import os
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, Integer, Text, TIMESTAMP
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.sql import func
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from multi_agent.utils import Base, User
 
 load_dotenv(override=True)
-
-Base = declarative_base()
-
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True)
-    kis_app_key = Column(Text, nullable=False)
-    kis_app_secret = Column(Text, nullable=False)
-    kis_access_token = Column(Text, nullable=True)
-    account_no = Column(Text, nullable=False)
-    investor_type = Column(Text, nullable=True)
-    created_at = Column(TIMESTAMP, server_default=func.now())
-    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
 
 def upload_sample_user():
     engine = create_engine(os.environ["DATABASE_URL"])
+    # 테이블 스키마 보장
+    Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()
     

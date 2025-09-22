@@ -8,7 +8,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
 from langfuse.langchain import CallbackHandler
 
-from multi_agent import multi_agent
+from multi_agent import get_multi_agent
 from .models import ChatRequest, StreamingStatus, FinalResponse
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,9 @@ async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
 @router.post("/chat", status_code=status.HTTP_200_OK)
 async def stock_chat(request: ChatRequest) -> StreamingResponse:
     try:
+        # 멀티에이전트 인스턴스 확보 (캐시)
+        async_db_url = os.getenv("ASYNC_DATABASE_URL")
+        multi_agent = get_multi_agent(async_db_url)
         user_id = request.user_id
         thread_id = request.thread_id
         query = request.message
@@ -99,11 +102,11 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
 
         return StreamingResponse(
             generate_sse_response(multi_agent, input_state, user_id, thread_id),
-            media_type="text/event-stream; charset=utf-8",
+            media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "Content-Type": "text/event-stream; charset=utf-8",
+                "Content-Type": "text/event-stream",
             }
         )
 
@@ -124,10 +127,10 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
         
         return StreamingResponse(
             error_stream(),
-            media_type="text/event-stream; charset=utf-8",
+            media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "Content-Type": "text/event-stream; charset=utf-8",
+                "Content-Type": "text/event-stream",
             }
         ) 

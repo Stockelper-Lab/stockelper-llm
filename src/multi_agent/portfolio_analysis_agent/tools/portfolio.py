@@ -67,13 +67,14 @@ class PortfolioAnalysisTool(BaseTool):
             "fid_trgt_exls_cls_code": "0",
         }
 
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, headers=headers, params=params) as response:
                 status_code = response.status
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 
@@ -103,13 +104,14 @@ class PortfolioAnalysisTool(BaseTool):
             "PRDT_TYPE_CD": prdt_type_cd
         }
 
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, headers=headers, params=params) as response:
                 status_code = response.status
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 
@@ -133,7 +135,7 @@ class PortfolioAnalysisTool(BaseTool):
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 
@@ -181,7 +183,7 @@ class PortfolioAnalysisTool(BaseTool):
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 
@@ -228,7 +230,7 @@ class PortfolioAnalysisTool(BaseTool):
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 
@@ -277,7 +279,7 @@ class PortfolioAnalysisTool(BaseTool):
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 
@@ -325,7 +327,7 @@ class PortfolioAnalysisTool(BaseTool):
                 text = await response.text()
 
                 update_access_token_flag = False
-                if status_code == 500 and "기간이 만료된 token" in text:
+                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
 

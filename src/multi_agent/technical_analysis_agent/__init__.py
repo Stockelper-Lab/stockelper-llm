@@ -1,16 +1,18 @@
-import os
 from .agent import TechnicalAnalysisAgent
 from .prompt import SYSTEM_TEMPLATE
 from .tools import *
 
 
-agent = TechnicalAnalysisAgent(
-    model="gpt-4o-mini",
-    tools=[
-        AnalysisStockTool(async_database_url=os.environ["ASYNC_DATABASE_URL"]),
-        PredictStockTool(),
-        StockChartAnalysisTool(async_database_url=os.environ["ASYNC_DATABASE_URL"]),
-    ],
-    system=SYSTEM_TEMPLATE,
-    name="TechnicalAnalysisAgent",
-)
+def build_agent(async_database_url: str):
+    if not async_database_url:
+        raise ValueError("async_database_url 가 필요합니다.")
+    return TechnicalAnalysisAgent(
+        model="gpt-4.1-mini",
+        tools=[
+            AnalysisStockTool(async_database_url=async_database_url),
+            PredictStockTool(),
+            StockChartAnalysisTool(async_database_url=async_database_url),
+        ],
+        system=SYSTEM_TEMPLATE,
+        name="TechnicalAnalysisAgent",
+    )

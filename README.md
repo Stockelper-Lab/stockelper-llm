@@ -213,7 +213,6 @@ Stockelper/
 - **PostgreSQL**: 사용자 데이터 및 체크포인트
 - **Neo4j**: 지식 그래프
 - **MongoDB**: 문서 저장소
-- **Milvus**: 벡터 데이터베이스
 
 ### 인프라
 - **Docker**: 컨테이너화

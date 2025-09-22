@@ -1,5 +1,6 @@
 import asyncio
 import os
+from dotenv import load_dotenv
 import json
 from dotenv import load_dotenv
 from pprint import pprint
@@ -64,6 +65,9 @@ class YouTubeSearchTool(BaseTool):
     ) -> Dict[str, Any]:
         """메인 비동기 실행 메서드"""
         try:
+            load_dotenv(override=True)
+            if not os.getenv("YOUTUBE_API_KEY"):
+                return {"error": "YOUTUBE_API_KEY 환경변수가 설정되어 있지 않습니다.", "query": query}
             # YouTube API 클라이언트 생성과 검색 실행
             youtube_search = await asyncio.get_event_loop().run_in_executor(
                 None,
