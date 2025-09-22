@@ -62,12 +62,28 @@ async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
                     yield f"data: {json.dumps(streaming_response.model_dump(), ensure_ascii=False)}\n\n"
                     
                 elif response_type == "values":
+                    # 최종 메시지를 토큰 단위(delta)로 스트리밍 후 마지막에 final 전송
+                    message_text = response.get("messages", [{}])[-1].content
+                    if isinstance(message_text, str):
+                        # 간단한 토큰화: 공백 단위로 분리하여 띄어쓰기 포함해 스트리밍
+                        tokens = message_text.split(" ")
+                        assembled = ""
+                        for i, tk in enumerate(tokens):
+                            if i > 0:
+                                assembled += " "
+                                yield f"data: {{\"type\": \"delta\", \"token\": \" \"}}\n\n"
+                            assembled += tk
+                            yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(tk, ensure_ascii=False)} }}\n\n"
+                    else:
+                        message_text = ""
+
                     final_response = FinalResponse(
                         type="final",
-                        message=response.get("messages", [{}])[-1].content,
+                        message=message_text,
                         subgraph=response.get("subgraph", {}),
                         trading_action=response.get("trading_action")
                     )
+            # 최종 응답과 종료 신호 전송
             yield f"data: {json.dumps(final_response.model_dump(), ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         
