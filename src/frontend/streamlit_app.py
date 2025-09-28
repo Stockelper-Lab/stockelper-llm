@@ -122,14 +122,22 @@ class StockChatApp:
                         try:
                             json_data = json.loads(data_content)
                             
-                            # 서버는 UTF-8 JSON을 전송하므로 추가 재디코딩은 수행하지 않음
+                            # 메시지 내 한글 디코딩 시도
+                            if json_data.get("message"):
+                                message = json_data.get("message")
+                                try:
+                                    # 깨진 UTF-8을 다시 디코딩 시도
+                                    if isinstance(message, str) and any(ord(c) > 127 for c in message):
+                                        # Latin-1로 인코딩 후 UTF-8로 디코딩
+                                        message = message.encode('latin-1').decode('utf-8')
+                                        json_data["message"] = message
+                                        print(f"메시지 디코딩 성공: {message}")
+                                except (UnicodeDecodeError, UnicodeEncodeError) as e:
+                                    print(f"메시지 디코딩 실패: {e}")
                             
                             if json_data.get("type") == "final":
                                 # final 메시지
                                 yield "final", json_data.get("message"), json_data
-                            elif json_data.get("type") == "delta":
-                                # token 단위 스트리밍
-                                yield "delta", json_data.get("token", ""), None
                             elif json_data.get("type") == "progress" or (json_data.get("step") and json_data.get("status")):
                                 # progress 메시지
                                 yield "progress", json_data.get("step"), json_data.get("status")
@@ -182,8 +190,6 @@ class StockChatApp:
         with st.chat_message("assistant"):
             status_placeholder = st.empty()
             message_placeholder = st.empty()
-            # 토큰 누적 버퍼
-            generated_text = ""
             
             # 스피너와 함께 진행 상황 표시
             with st.spinner("분석 중..."):
@@ -239,16 +245,10 @@ class StockChatApp:
                             # 현재 진행중인 모든 작업 표시
                             update_status_display()
                             
-                        elif response_type == "delta":
-                            # 토큰 단위로 메시지를 갱신
-                            token = content or ""
-                            generated_text += token
-                            message_placeholder.markdown(generated_text, unsafe_allow_html=True)
-
                         elif response_type == "final":
                             print(f"최종 메시지 수신: {content}")  # 디버그 로그
                             # 최종 결과 표시
-                            final_message = content or generated_text
+                            final_message = content
                             final_data = extra
                             
                             # 모든 진행중 작업 완료 표시
@@ -369,7 +369,6 @@ class StockChatApp:
             
             with st.spinner("거래 처리 중..."):
                 running_tasks = {}  # 피드백 처리 중 진행중인 작업들 추적
-                generated_text = ""
                 
                 def get_step_icon(step):
                     """step에 따른 아이콘 반환"""
@@ -416,13 +415,8 @@ class StockChatApp:
                         # 현재 진행중인 모든 작업 표시
                         update_status_display()
                         
-                    elif response_type == "delta":
-                        token = content or ""
-                        generated_text += token
-                        message_placeholder.markdown(generated_text, unsafe_allow_html=True)
-
                     elif response_type == "final":
-                        final_message = content or generated_text
+                        final_message = content
                         status_placeholder.empty()
                         message_placeholder.markdown(final_message, unsafe_allow_html=True)
                         st.session_state.messages.append({"role": "assistant", "content": final_message})
