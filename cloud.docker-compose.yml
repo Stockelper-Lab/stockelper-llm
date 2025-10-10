@@ -22,9 +22,8 @@ services:
       - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/llm_users
       - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
       - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
       - REQUESTS_TIMEOUT=300
+      # LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are loaded from .env.cloud
     networks:
       stockelper:
       internal:
