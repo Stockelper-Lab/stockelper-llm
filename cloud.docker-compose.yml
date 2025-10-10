@@ -1,0 +1,64 @@
+services:
+  llm-server:
+    container_name: llm-server
+    build: .
+    ports:
+      - "21009:21009"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ${HOME}/.cache/huggingface/hub:/root/.cache/huggingface/hub
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:21009/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    env_file:
+      - .env.cloud
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/llm_users
+      - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/llm_users
+      - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - REQUESTS_TIMEOUT=300
+    networks:
+      stockelper:
+      internal:
+
+  db:
+    image: docker.io/postgres:${POSTGRES_VERSION:-latest}
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres # CHANGEME
+      POSTGRES_DB: postgres
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-multiple-db.sh:/docker-entrypoint-initdb.d/init-multiple-db.sh:ro
+    networks:
+      stockelper:
+      internal:
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  stockelper:
+    driver: bridge
+    name: stockelper
+    external: true
+  internal:
+    driver: bridge
+
