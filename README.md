@@ -116,6 +116,11 @@ docker compose up --build -d
 docker compose exec llm-server uv run python src/upload_user.py
 ```
 
+### KSIC 한국표준산업분류 데이터 업로드
+```bash
+docker compose exec llm-server uv run python src/upload_industy.py
+```
+
 ### 프론트엔드 실행 (테스트용)
 ```bash
 streamlit run src/frontend/streamlit_app.py

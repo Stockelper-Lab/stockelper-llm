@@ -9,8 +9,8 @@ load_dotenv(override=True)
 
 def upload_sample_user():
     engine = create_engine(os.environ["DATABASE_URL"])
-    # 테이블 스키마 보장
-    Base.metadata.create_all(engine)
+    # users 테이블만 생성
+    User.__table__.create(engine, checkfirst=True)
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()
     
@@ -29,7 +29,7 @@ def upload_sample_user():
             kis_app_secret=os.getenv("KIS_APP_SECRET"),
             kis_access_token=os.getenv("KIS_ACCESS_TOKEN"),
             account_no=os.getenv("KIS_ACCOUNT_NO"),
-            investor_type="beginner"
+            investor_type="안정추구형"
         )
         session.add(user)
         session.commit()
