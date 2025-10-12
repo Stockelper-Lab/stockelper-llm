@@ -34,7 +34,7 @@ class BaseAnalysisAgent:
         self.tools_by_name = {tool.name: tool for tool in tools}
         self.name = name
         self.system_message = SystemMessage(content=system)
-
+        
         workflow = StateGraph(SubState)
         workflow.add_node("agent", self.agent)
         workflow.add_node("execute_tool", self.execute_tool)
@@ -72,10 +72,11 @@ class BaseAnalysisAgent:
         async def execute_single_tool(tool_call):
             """단일 tool 실행을 래핑하여 시작/끝 스트리밍 추가"""
             tool_name = tool_call["name"]
+            tool = self.tools_by_name[tool_name]
             stream_writer({"step": tool_name, "status": "start"})
 
             try:
-                result = await self.tools_by_name[tool_name].ainvoke(
+                result = await tool.ainvoke(
                     tool_call["args"], 
                     config={"configurable": {"user_id": config["configurable"]["user_id"]}}
                 )
@@ -84,7 +85,8 @@ class BaseAnalysisAgent:
                     "error": str(e)
                 }
             stream_writer({"step": tool_name, "status": "end"})
-            return tool_call, result
+            return_direct = tool.return_direct
+            return tool_call, result, return_direct
 
         # 모든 tool_call을 병렬로 처리하기 위한 태스크 리스트 생성
         tasks = [execute_single_tool(tool_call) for tool_call in state.messages[-1].tool_calls]
@@ -92,19 +94,24 @@ class BaseAnalysisAgent:
         results = await asyncio.gather(*tasks)
 
         # 모든 태스크 비동기적으로 실행
-        for tool_call, result in results:
+        return_direct = False
+        for tool_call, result, tool_return_direct in results:
             outputs.append(
                 ToolMessage(
                     name=tool_call["name"],
-                    content=json.dumps(result, indent=2, ensure_ascii=False),
+                    content=json.dumps(result, indent=2, ensure_ascii=False) if not isinstance(result, str) else result,
                     tool_call_id=tool_call["id"],
                 )
             )
+            return_direct |= tool_return_direct
 
         update = {
             "messages": outputs,
             "execute_tool_count": state.execute_tool_count + 1,
         }
-        goto = "agent"
+        if return_direct:
+            goto = "__end__"
+        else:
+            goto = "agent"
 
         return Command(update=update, goto=goto) 

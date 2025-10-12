@@ -36,7 +36,8 @@ class AnalysisStockTool(BaseTool):
         "A comprehensive stock analysis tool that provides key market information, price trends, trading status, investment indicators (PER, PBR, EPS, BPS), foreign ownership ratio, and market warning signals for listed companies."
     )
     args_schema: Type[BaseModel] = AnalysisStockInput
-
+    return_direct: bool = False
+    
     async_engine: object
 
     def __init__(self, async_database_url: str):
