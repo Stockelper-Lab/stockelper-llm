@@ -320,6 +320,7 @@ class StockChartAnalysisTool(BaseTool):
     """
     args_schema: Type[BaseModel] = StockChartAnalysisInput
     analyzer: StockChartAnalyzer
+    return_direct: bool = False
 
     def __init__(self, async_database_url: str):
         llm = ChatOpenAI(

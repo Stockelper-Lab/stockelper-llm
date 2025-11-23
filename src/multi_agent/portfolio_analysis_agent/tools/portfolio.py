@@ -6,25 +6,55 @@ from langchain_core.callbacks import (
 )
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
+import time
 import pandas as pd
 import numpy as np
-from ...utils import get_user_kis_credentials, get_access_token
+from ...utils import get_user_kis_credentials, get_access_token, Industy
 
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 import aiohttp
 import logging
 import os
 import asyncio
 import json
+import OpenDartReader
 
 logger = logging.getLogger(__name__)
 async_engine = create_async_engine(os.environ["ASYNC_DATABASE_URL"], echo=False)
+async_engine_ksic = create_async_engine(os.environ["ASYNC_DATABASE_URL_KSIC"], echo=False)
 
+
+MARKET_MAP = {
+    "Y": "유가",
+    "K": "코스닥",
+    "N": "코넥스",
+    "E": "기타"
+}
+
+
+class PortfolioAnalysisInput(BaseModel):
+    user_investor_type: str = Field(
+        description="The investor type of the user. It indicates the user's investment style or risk profile."
+    )
 
 class PortfolioAnalysisTool(BaseTool):
     name: str = "portfolio_analysis"
-    description: str = "Analyzes and recommends portfolio based on market value, stability, profitability, and growth metrics"
+    description: str = "Analyzes and recommends portfolio based on user's investor type. Evaluates stocks using market value, stability, profitability, and growth metrics, then suggests optimal portfolio composition tailored to the user's investment style."
     url_base: str = "https://openapi.koreainvestment.com:9443"
+    args_schema: Type[BaseModel] = PortfolioAnalysisInput
+
+    return_direct: bool = True
+
+    def _ensure_rate_limiter(self):
+        if not hasattr(self, "_rate_sem"):
+            self._rate_sem = asyncio.Semaphore(2)
+
+    async def _throttle(self):
+        self._ensure_rate_limiter()
+        await self._rate_sem.acquire()
+        asyncio.get_running_loop().call_later(1.0, self._rate_sem.release)
+        # pass
 
     def _make_headers(self, tr_id: str, user_info: dict) -> dict:
         """공통 헤더 생성 함수"""
@@ -69,6 +99,7 @@ class PortfolioAnalysisTool(BaseTool):
 
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            await self._throttle()
             async with session.get(url, headers=headers, params=params) as response:
                 status_code = response.status
                 text = await response.text()
@@ -81,6 +112,7 @@ class PortfolioAnalysisTool(BaseTool):
                     headers["authorization"] = (
                         f"Bearer {user_info['kis_access_token']}"
                     )
+                    await self._throttle()
                     async with session.get(
                         url, headers=headers, params=params
                     ) as res_refresh:
@@ -90,34 +122,34 @@ class PortfolioAnalysisTool(BaseTool):
                 data = json.loads(text)
 
                 logger.debug("Top market value stocks fetched: %s", data)
-                return data.get("output", []), update_access_token_flag
+                return data.get("output", []), update_access_token_flag, user_info
 
-    async def get_stock_basic_info(self, pdno, prdt_type_cd="300", user_info=None):
-        """종목의 상세 주식 정보를 조회합니다."""
-        # logger.info("Fetching basic info for stock with PDNO: %s", pdno)
-        path = "/uapi/domestic-stock/v1/quotations/search-stock-info"
-        url = self.url_base + path
-        headers = self._make_headers("CTPF1002R", user_info)
+    async def get_stock_basic_info(self, symbol):
+        """OpenDART API를 사용하여 기업 정보를 조회하고, 산업분류명을 추가합니다."""
+        dart = OpenDartReader(os.getenv("OPEN_DART_API_KEY"))
+        result = dart.company(symbol)
 
-        params = {
-            "PDNO": pdno,
-            "PRDT_TYPE_CD": prdt_type_cd
-        }
-
-        timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, headers=headers, params=params) as response:
-                status_code = response.status
-                text = await response.text()
-
-                update_access_token_flag = False
-                if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
-                    user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
-                    update_access_token_flag = True
-
-                data = json.loads(text)
-                return data.get("output", {}), update_access_token_flag
-
+        result["market"] = MARKET_MAP.get(result.get("corp_cls"), result.get("corp_cls"))
+        
+        # result에서 induty_code 추출
+        induty_code = result.get("induty_code")
+        
+        # async_engine_ksic를 사용하여 industy 테이블에서 induty_name 조회
+        if induty_code:
+            async with AsyncSession(async_engine_ksic) as session:
+                stmt = select(Industy).where(Industy.industy_code == induty_code)
+                db_result = await session.execute(stmt)
+                industy = db_result.scalar_one_or_none()
+                
+                if industy:
+                    result["induty_name"] = industy.industy_name
+                else:
+                    result["induty_name"] = "N/A"
+        else:
+            result["induty_name"] = "N/A"
+        
+        return result
+        
 
     async def get_stability_ratio(self, symbol: str, div_cd: str = "0", user_info=None):
         """국내주식 안정성 비율 조회"""
@@ -130,6 +162,7 @@ class PortfolioAnalysisTool(BaseTool):
         }
 
         async with aiohttp.ClientSession() as session:
+            await self._throttle()
             async with session.get(url, headers=headers, params=params) as response:
                 status_code = response.status
                 text = await response.text()
@@ -138,6 +171,16 @@ class PortfolioAnalysisTool(BaseTool):
                 if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
+
+                    headers["authorization"] = (
+                        f"Bearer {user_info['kis_access_token']}"
+                    )
+                    await self._throttle()
+                    async with session.get(
+                        url, headers=headers, params=params
+                    ) as res_refresh:
+                        status_code = res_refresh.status
+                        text = await res_refresh.text()
 
                 data = json.loads(text)
                 api_output = data['output'][:4]
@@ -164,7 +207,7 @@ class PortfolioAnalysisTool(BaseTool):
                 df["weighted_score"] = df["StabilityScore"] * df["weight"]
                 final_score = df["weighted_score"].sum()
 
-                return final_score, api_output, update_access_token_flag
+                return final_score, api_output, update_access_token_flag, user_info
 
 
     async def get_profit_ratio(self, symbol: str, div_cd: str = "1", user_info=None):
@@ -178,6 +221,7 @@ class PortfolioAnalysisTool(BaseTool):
         }
 
         async with aiohttp.ClientSession() as session:
+            await self._throttle()
             async with session.get(url, headers=headers, params=params) as response:
                 status_code = response.status
                 text = await response.text()
@@ -186,6 +230,16 @@ class PortfolioAnalysisTool(BaseTool):
                 if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
+
+                    headers["authorization"] = (
+                        f"Bearer {user_info['kis_access_token']}"
+                    )
+                    await self._throttle()
+                    async with session.get(
+                        url, headers=headers, params=params
+                    ) as res_refresh:
+                        status_code = res_refresh.status
+                        text = await res_refresh.text()
 
                 data = json.loads(text)
                 api_output = data['output'][:4]
@@ -212,7 +266,7 @@ class PortfolioAnalysisTool(BaseTool):
                 df["weighted_score"] = df["StabilityScore"] * df["weight"]
                 final_score = df["weighted_score"].sum()
 
-                return final_score, api_output, update_access_token_flag
+                return final_score, api_output, update_access_token_flag, user_info
 
     async def get_growth_ratio(self, symbol: str, div_cd: str = "1", user_info=None):
         """성장성 비율 조회"""
@@ -225,6 +279,7 @@ class PortfolioAnalysisTool(BaseTool):
         }
 
         async with aiohttp.ClientSession() as session:
+            await self._throttle()
             async with session.get(url, headers=headers, params=params) as response:
                 status_code = response.status
                 text = await response.text()
@@ -233,6 +288,16 @@ class PortfolioAnalysisTool(BaseTool):
                 if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
+
+                    headers["authorization"] = (
+                        f"Bearer {user_info['kis_access_token']}"
+                    )
+                    await self._throttle()
+                    async with session.get(
+                        url, headers=headers, params=params
+                    ) as res_refresh:
+                        status_code = res_refresh.status
+                        text = await res_refresh.text()
 
                 data = json.loads(text)
 
@@ -261,7 +326,7 @@ class PortfolioAnalysisTool(BaseTool):
                 df["weighted_score"] = df["StabilityScore"] * df["weight"]
                 final_score = df["weighted_score"].sum()
 
-                return final_score, api_output, update_access_token_flag
+                return final_score, api_output, update_access_token_flag, user_info
 
     async def get_major_ratio(self, symbol: str, div_cd: str = "1", user_info=None):
         """기타 주요 비율 조회"""
@@ -274,6 +339,7 @@ class PortfolioAnalysisTool(BaseTool):
         }
 
         async with aiohttp.ClientSession() as session:
+            await self._throttle()
             async with session.get(url, headers=headers, params=params) as response:
                 status_code = response.status
                 text = await response.text()
@@ -282,6 +348,16 @@ class PortfolioAnalysisTool(BaseTool):
                 if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
+
+                    headers["authorization"] = (
+                        f"Bearer {user_info['kis_access_token']}"
+                    )
+                    await self._throttle()
+                    async with session.get(
+                        url, headers=headers, params=params
+                    ) as res_refresh:
+                        status_code = res_refresh.status
+                        text = await res_refresh.text()
 
                 data = json.loads(text)
 
@@ -309,7 +385,7 @@ class PortfolioAnalysisTool(BaseTool):
                 df["weighted_score"] = df["StabilityScore"] * df["weight"]
                 final_score = df["weighted_score"].sum()
 
-                return final_score, api_output, update_access_token_flag
+                return final_score, api_output, update_access_token_flag, user_info
 
     async def get_financial_ratio(self, symbol: str, div_cd: str = "1", user_info=None):
         """재무 비율 조회"""
@@ -322,6 +398,7 @@ class PortfolioAnalysisTool(BaseTool):
         }
 
         async with aiohttp.ClientSession() as session:
+            await self._throttle()
             async with session.get(url, headers=headers, params=params) as response:
                 status_code = response.status
                 text = await response.text()
@@ -330,6 +407,16 @@ class PortfolioAnalysisTool(BaseTool):
                 if status_code in (401, 403, 500) and ("기간이 만료된 token" in text or "유효하지 않은 token" in text):
                     user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
                     update_access_token_flag = True
+
+                    headers["authorization"] = (
+                        f"Bearer {user_info['kis_access_token']}"
+                    )
+                    await self._throttle()
+                    async with session.get(
+                        url, headers=headers, params=params
+                    ) as res_refresh:
+                        status_code = res_refresh.status
+                        text = await res_refresh.text()
 
                 data = json.loads(text)
                 api_output = data['output'][:4]
@@ -357,8 +444,52 @@ class PortfolioAnalysisTool(BaseTool):
                 df["weighted_score"] = df["StabilityScore"] * df["weight"]
                 final_score = df["weighted_score"].sum()
 
-                return final_score, api_output, update_access_token_flag
+                return final_score, api_output, update_access_token_flag, user_info
 
+    async def analyze_stock(self, symbol: str, user_info: dict, risk_level: str):
+        should_update_access_token = False
+
+        stock_info = await self.get_stock_basic_info(symbol)
+
+        stability_score, stability_data, update_access_token_flag, user_info = await self.get_stability_ratio(symbol, user_info=user_info)
+        should_update_access_token |= update_access_token_flag
+
+        profit_score, profit_data, update_access_token_flag, user_info = await self.get_profit_ratio(symbol, user_info=user_info)
+        should_update_access_token |= update_access_token_flag
+        
+        growth_score, growth_data, update_access_token_flag, user_info = await self.get_growth_ratio(symbol, user_info=user_info)
+        should_update_access_token |= update_access_token_flag
+        
+        major_score, major_data, update_access_token_flag, user_info = await self.get_major_ratio(symbol, user_info=user_info)
+        should_update_access_token |= update_access_token_flag
+        
+        fin_score, fin_data, update_access_token_flag, user_info = await self.get_financial_ratio(symbol, user_info=user_info)
+        should_update_access_token |= update_access_token_flag
+
+        total_score = self._calculate_total_score(
+            stability_score, profit_score, growth_score,
+            major_score, fin_score, risk_level
+        )
+
+        analysis_result = {
+            "symbol": symbol,
+            "name": stock_info.get("corp_name"),
+            "market": stock_info.get("market"),
+            "sector": stock_info.get("induty_name"),
+            "total_score": float(total_score),
+            "stability_score": float(stability_score),
+            "profit_score": float(profit_score),
+            "growth_score": float(growth_score),
+            "details": {
+                "stability": stability_data,
+                "profit": profit_data,
+                "growth": growth_data,
+                "major": major_data,
+                "financial": fin_data
+            }
+        }
+
+        return analysis_result, should_update_access_token
 
     async def analyze_portfolio(self, risk_level: str, user_info: dict, top_n: int = 30) -> Dict:
         """
@@ -368,68 +499,29 @@ class PortfolioAnalysisTool(BaseTool):
         """
         logger.info("Analyzing portfolio for risk level: %s with top N: %d", risk_level, top_n)
         # 1. 시가총액 상위 종목 조회
-        ranking, update_access_token_flag = await self.get_top_market_value(fid_rank_sort_cls_code='23', user_info=user_info)
+        ranking, update_access_token_flag, user_info = await self.get_top_market_value(fid_rank_sort_cls_code='23', user_info=user_info)
         portfolio_data = []
-        should_update_access_token = False
-        if update_access_token_flag:
-            should_update_access_token = True
+        should_update_access_token = update_access_token_flag
 
+        tasks = []
         # 2. 각 종목별 지표 분석
         for item in ranking[:top_n]:
             symbol = item.get("mksc_shrn_iscd")
             if not symbol:
                 logger.warning("No symbol found for item: %s", item)
                 continue
+            tasks.append(self.analyze_stock(symbol, user_info, risk_level))
 
-            logger.info("Analyzing stock: %s", symbol)
-            stock_info, update_access_token_flag = await self.get_stock_basic_info(symbol, user_info=user_info)
-            if update_access_token_flag:
-                should_update_access_token = True
-            stability_score, stability_data, update_access_token_flag = await self.get_stability_ratio(symbol, user_info=user_info)
-            if update_access_token_flag:
-                should_update_access_token = True
-            profit_score, profit_data, update_access_token_flag = await self.get_profit_ratio(symbol, user_info=user_info)
-            if update_access_token_flag:
-                should_update_access_token = True
-            growth_score, growth_data, update_access_token_flag = await self.get_growth_ratio(symbol, user_info=user_info)
-            if update_access_token_flag:
-                should_update_access_token = True
-            major_score, major_data, update_access_token_flag = await self.get_major_ratio(symbol, user_info=user_info)
-            if update_access_token_flag:
-                should_update_access_token = True
-            fin_score, fin_data, update_access_token_flag = await self.get_financial_ratio(symbol, user_info=user_info)
-            if update_access_token_flag:
-                should_update_access_token = True
-
-            # 종목별 종합 점수 계산
-            total_score = self._calculate_total_score(
-                stability_score, profit_score, growth_score,
-                major_score, fin_score, risk_level
-            )
-
-            portfolio_data.append({
-                "symbol": symbol,
-                "name": stock_info.get("prdt_name"),
-                "market": stock_info.get("mket_id_cd"),
-                "sector": stock_info.get("std_idst_clsf_cd_name"),
-                "total_score": total_score,
-                "stability_score": stability_score,
-                "profit_score": profit_score,
-                "growth_score": growth_score,
-                "details": {
-                    "stability": stability_data,
-                    "profit": profit_data,
-                    "growth": growth_data,
-                    "major": major_data,
-                    "financial": fin_data
-                }
-            })
+        results = await asyncio.gather(*tasks)
+        for analysis_result, flag in results:
+            should_update_access_token |= flag
+            portfolio_data.append(analysis_result)
 
         logger.info("Portfolio analysis completed. Total stocks analyzed: %d", len(portfolio_data))
         # 3. 투자 성향에 따른 포트폴리오 구성
         if should_update_access_token:
             from multi_agent.utils import update_user_kis_credentials
-            await update_user_kis_credentials(self.async_engine, user_info['id'], user_info['kis_access_token'])
+            await update_user_kis_credentials(async_engine, user_info['id'], user_info['kis_access_token'])
         return self._build_portfolio_recommendation(portfolio_data, risk_level)
 
     def _calculate_total_score(self, stability: float, profit: float, 
@@ -516,48 +608,71 @@ class PortfolioAnalysisTool(BaseTool):
             "portfolio_size": portfolio_size,
             "recommendations": recommended_portfolio
         }
+
+    def _format_analysis_result_to_markdown(self, analysis_result: Dict) -> str:
+        """분석 결과를 한국어 마크다운 표로 변환"""
+        risk_level = analysis_result.get("risk_level", "N/A")
+        portfolio_size = analysis_result.get("portfolio_size", 0)
+        recommendations = analysis_result.get("recommendations", [])
+        
+        # 마크다운 시작
+        markdown = "# 포트폴리오 분석 결과\n\n"
+        
+        # 포트폴리오 개요
+        markdown += "## 📋 포트폴리오 개요\n"
+        markdown += f"- **투자 성향**: {risk_level}\n"
+        markdown += f"- **추천 종목 수**: {portfolio_size}개\n\n"
+        markdown += "---\n\n"
+        
+        # 추천 종목 목록 표
+        markdown += "## 🎯 추천 종목 목록\n\n"
+        markdown += "| 순위 | 종목명 | 종목코드 | 업종 | 시장 | 투자비중 | 종합점수 | 안정성점수 | 수익성점수 | 성장성점수 |\n"
+        markdown += "|:---:|:---|:---:|:---|:---|---:|---:|---:|---:|---:|\n"
+        
+        for idx, stock in enumerate(recommendations, 1):
+            name = stock.get("name", "N/A")
+            symbol = stock.get("symbol", "N/A")
+            sector = stock.get("sector", "N/A")
+            market = stock.get("market", "N/A")
+            weight = stock.get("weight", 0)
+            total_score = stock.get("total_score", 0)
+            stability_score = stock.get("stability_score", 0)
+            profit_score = stock.get("profit_score", 0)
+            growth_score = stock.get("growth_score", 0)
+            
+            markdown += f"| {idx} | {name} | {symbol} | {sector} | {market} | {weight}% | {total_score:.3f} | {stability_score:.3f} | {profit_score:.3f} | {growth_score:.3f} |\n"
+        
+        return markdown
     
-    def _run(self, config: RunnableConfig = None, run_manager: Optional[CallbackManagerForToolRun] = None) -> Dict:
+    def _run(self, user_investor_type: str, config: RunnableConfig = None, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
         return asyncio.run(self._arun(config, run_manager))
 
 
     async def _arun(
         self, 
+        user_investor_type: str,
         config: RunnableConfig = None,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
-    ) -> Dict:
+    ) -> str:
         """
         비동기 포트폴리오 분석 실행 메서드
         risk_profile: 투자자의 위험 성향 (선택적)
         top_n: 분석할 종목 수
         """
-        try:
-            # user_info를 가져오는 비동기 호출
-            user_info = await get_user_kis_credentials(async_engine=async_engine, user_id=config["configurable"]["user_id"])
-            update_access_token_flag = False
+        # try:
+        # user_info를 가져오는 비동기 호출
+        user_info = await get_user_kis_credentials(async_engine=async_engine, user_id=config["configurable"]["user_id"])
+        update_access_token_flag = False
 
-            if not user_info['kis_access_token']:
-                access_token = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
-                user_info['kis_access_token'] = access_token
-                update_access_token_flag = True
-            
-            risk_profile = user_info.get("investor_type")
-            if not risk_profile:
-                # 기본값 설정
-                risk_profile = "위험중립형"
-                    
-            logger.info(f"User ID: {config['configurable']['user_id']}, Risk Profile: {risk_profile}, User Info: {user_info}")
-            
-            # 포트폴리오 분석 실행
-            analysis_result = await self.analyze_portfolio(risk_profile, user_info, top_n=20)
+        if not user_info['kis_access_token']:
+            access_token = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
+            user_info['kis_access_token'] = access_token
+            update_access_token_flag = True
+        
+        # 포트폴리오 분석 실행
+        analysis_result = await self.analyze_portfolio(user_investor_type, user_info, top_n=20)
 
-            return analysis_result
-        except Exception as e:
-            logger.error(f"Error in portfolio analysis: {str(e)}")
-            # 에러 발생 시 기본 응답
-            return {
-                "error": str(e),
-                "risk_level": risk_profile or "unknown",
-                "portfolio_size": 0,
-                "recommendations": []
-            }
+        # 마크다운 형식으로 변환하여 반환
+        markdown_result = self._format_analysis_result_to_markdown(analysis_result)
+        
+        return markdown_result

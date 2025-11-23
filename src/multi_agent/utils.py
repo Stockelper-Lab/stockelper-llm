@@ -28,6 +28,13 @@ class User(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
+# 산업분류 테이블 모델 정의
+class Industy(Base):
+    __tablename__ = "industy"
+
+    industy_code = Column(Text, primary_key=True)  # 5자리 패딩된 산업분류코드
+    industy_name = Column(Text, nullable=False)  # 산업분류명
+
 # 사용자 정보 조회 함수
 async def get_user_kis_credentials(async_engine: object, user_id: int):
     async with AsyncSession(async_engine) as session:
@@ -37,6 +44,7 @@ async def get_user_kis_credentials(async_engine: object, user_id: int):
 
         if user:
             return {
+                "id": user.id,
                 "kis_app_key": user.kis_app_key,
                 "kis_app_secret": user.kis_app_secret,
                 "kis_access_token": user.kis_access_token,

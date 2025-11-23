@@ -105,7 +105,12 @@ class SupervisorAgent:
             and state.agent_results[-1]["target"] == "InvestmentStrategyAgent"
         ):
             update, goto = await self.trading(state, config)
-        
+        elif (
+            state.agent_results
+            and state.execute_agent_count > 0
+            and state.agent_results[-1]["target"] == "PortfolioAnalysisAgent"
+        ):
+            update, goto = await self.routing_user(state, config)
         else:
             update, goto = await self.routing(state, config)
         
@@ -225,7 +230,10 @@ class SupervisorAgent:
             messages = [HumanMessage(content=STOCK_CODE_USER_TEMPLATE.format(stock_name=stock_name, stock_codes=stock_codes))]
             response = await self.llm_with_stock_code.ainvoke(messages)
             stock_code = response.stock_code
-            subgraph = self.get_subgraph_by_stock_name(stock_name)
+            try:
+                subgraph = self.get_subgraph_by_stock_name(stock_name)
+            except Exception as e:
+                subgraph = "None"
         else:
             stock_code = "None"
             subgraph = "None"
@@ -360,6 +368,18 @@ class SupervisorAgent:
                 goto = "execute_agent"
         return update, goto
     
+    async def routing_user(self, state, config):
+        messages = [AIMessage(content=state.agent_results[-1]["result"])]
+        update = State(
+            messages=messages,
+            agent_results=state.agent_results,
+            subgraph=state.subgraph,
+            stock_name=state.stock_name,
+            stock_code=state.stock_code
+        )
+        goto = "__end__"
+        return update, goto
+        
 _STOCK_LISTING_CACHE = None
 
 

@@ -64,7 +64,7 @@ If none of the conditions match the current situation, respond to the user direc
   }, 
   {
     "name": "PortfolioAnalysisAgent",
-    "description": "An expert who creates optimized investment portfolios based on risk profile analysis and market data.",
+    "description": "An expert who analyzes the user’s investment profile and recommends an investment portfolio based on it.",
     "Available Tools": [
       "Portfolio analysis tool"
     ],

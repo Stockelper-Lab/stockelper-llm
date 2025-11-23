@@ -21,7 +21,9 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/llm_users
+      - DATABASE_URL_KSIC=postgresql+psycopg://postgres:postgres@db:5432/ksic
       - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/llm_users
+      - ASYNC_DATABASE_URL_KSIC=postgresql+asyncpg://postgres:postgres@db:5432/ksic
       - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
       - LANGFUSE_HOST=http://langfuse-web:3000
       - LANGFUSE_PUBLIC_KEY=abcde
