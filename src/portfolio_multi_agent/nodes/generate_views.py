@@ -65,6 +65,25 @@ Here is the output schema:
 ```
 """
 
+    USER_TEMPLATE = """**종목 정보:**
+- 종목명: {stock_name}
+- 종목코드: {stock_code}
+
+**분석 결과:**
+
+1. **웹 검색 분석 (최근 뉴스 및 시장 동향):**
+{web_search}
+
+2. **재무제표 분석:**
+{financial_statement}
+
+3. **기술적 지표 분석:**
+{technical_indicator}
+
+---
+
+위 세 가지 분석 결과를 종합하여 투자 의견을 JSON 형식으로 제공해주세요."""
+
     def __init__(self, model: str = "gpt-4o"):
         """
         투자자 뷰 생성기
@@ -146,41 +165,6 @@ Here is the output schema:
 
         return grouped
 
-    def create_user_prompt(
-        self, stock_name: str, stock_code: str, analyses: dict[str, str]
-    ) -> str:
-        """
-        사용자 프롬프트 생성
-
-        Args:
-            stock_name: 종목명
-            stock_code: 종목 코드
-            analyses: 분석 결과 딕셔너리
-
-        Returns:
-            프롬프트 문자열
-        """
-        prompt = f"""**종목 정보:**
-- 종목명: {stock_name}
-- 종목코드: {stock_code}
-
-**분석 결과:**
-
-1. **웹 검색 분석 (최근 뉴스 및 시장 동향):**
-{analyses.get('web_search', '정보 없음')}
-
-2. **재무제표 분석:**
-{analyses.get('financial_statement', '정보 없음')}
-
-3. **기술적 지표 분석:**
-{analyses.get('technical_indicator', '정보 없음')}
-
----
-
-위 세 가지 분석 결과를 종합하여 투자 의견을 JSON 형식으로 제공해주세요."""
-
-        return prompt
-
     async def generate_view_for_stock(
         self,
         stock_index: int,
@@ -215,18 +199,25 @@ Here is the output schema:
                 reasoning="분석 데이터가 부족하여 중립적 입장을 유지합니다.",
             )
 
-        # 사용자 프롬프트 생성
-        user_content = self.create_user_prompt(stock_name, stock_code, analyses)
-
-        # 메시지 구성
         messages = [
             {
                 "role": "system",
                 "content": self.SYSTEM_TEMPLATE.format(
-                    response_schema=json.dumps(ViewResponseSchema.model_json_schema())
+                    response_schema=json.dumps(
+                        ViewResponseSchema.model_json_schema(),
+                        indent=2,
+                        ensure_ascii=False,
+                    )
                 ),
             },
-            {"role": "user", "content": user_content},
+            {
+                "role": "user",
+                "content": self.USER_TEMPLATE.format(
+                    stock_name=stock_name,
+                    stock_code=stock_code,
+                    **analyses,
+                ),
+            },
         ]
 
         # LLM 체인 실행
