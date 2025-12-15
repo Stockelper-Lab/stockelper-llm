@@ -92,7 +92,10 @@ class TradingResult(BaseModel):
     used_cash: float = Field(description="실제 사용한 현금")
 
 
-class InputState(BaseModel):
+# ==================== 매수 워크플로우 State ====================
+
+
+class BuyInputState(BaseModel):
     max_portfolio_size: int = Field(
         default=10, description="Maximum number of stocks in the portfolio"
     )
@@ -103,7 +106,7 @@ class InputState(BaseModel):
     )
 
 
-class PrivateState(BaseModel):
+class BuyPrivateState(BaseModel):
     analysis_results: Annotated[list[AnalysisResult], add_value] = Field(
         default_factory=list
     )
@@ -117,7 +120,7 @@ class PrivateState(BaseModel):
     )
 
 
-class OutputState(BaseModel):
+class BuyOutputState(BaseModel):
     analysis_results: list[AnalysisResult] = Field(default_factory=list)
     portfolio_result: Optional[PortfolioResult] = Field(
         default=None, description="포트폴리오 최적화 결과"
@@ -127,5 +130,83 @@ class OutputState(BaseModel):
     )
 
 
-class OverallState(InputState, PrivateState, OutputState):
+class BuyOverallState(BuyInputState, BuyPrivateState, BuyOutputState):
+    pass
+
+
+# ==================== 매도 워크플로우 State ====================
+
+
+class HoldingStock(BaseModel):
+    """보유 종목 정보"""
+
+    code: str = Field(description="종목 코드")
+    name: str = Field(description="종목명")
+    quantity: int = Field(description="보유 수량")
+    avg_buy_price: float = Field(description="평균 매입가")
+    current_price: float = Field(description="현재가")
+    return_rate: float = Field(description="수익률 (소수, 예: 0.15 = 15%)")
+    evaluated_amount: float = Field(description="평가 금액")
+    profit_loss: float = Field(description="평가 손익")
+
+
+class SellDecision(BaseModel):
+    """매도 결정 (전체 매도만 가능)"""
+
+    code: str = Field(description="종목 코드")
+    name: str = Field(description="종목명")
+    reasoning: str = Field(description="매도 사유")
+
+
+class SellResult(BaseModel):
+    """매도 실행 결과"""
+
+    orders: list[OrderResult] = Field(description="매도 주문 결과 리스트")
+    total_evaluated_amount: float = Field(description="총 평가 금액")
+    sold_amount: float = Field(description="매도한 금액")
+
+
+class SellInputState(BaseModel):
+    """매도 워크플로우 입력 상태"""
+
+    loss_threshold: float = Field(
+        default=-0.10, description="손실 매도 기준 (소수, 예: -0.10 = -10%)"
+    )
+    profit_threshold: float = Field(
+        default=0.20, description="익절 매도 기준 (소수, 예: 0.20 = 20%)"
+    )
+
+
+class SellPrivateState(BaseModel):
+    """매도 워크플로우 내부 상태"""
+
+    holding_stocks: list[HoldingStock] = Field(
+        default_factory=list, description="보유 종목 리스트"
+    )
+    analysis_results: Annotated[list[AnalysisResult], add_value] = Field(
+        default_factory=list, description="종목별 분석 결과"
+    )
+    sell_decisions: list[SellDecision] = Field(
+        default_factory=list, description="매도 결정 리스트"
+    )
+
+
+class SellOutputState(BaseModel):
+    """매도 워크플로우 출력 상태"""
+
+    holding_stocks: list[HoldingStock] = Field(
+        default_factory=list, description="보유 종목 리스트"
+    )
+    analysis_results: list[AnalysisResult] = Field(
+        default_factory=list, description="종목별 분석 결과"
+    )
+    sell_decisions: list[SellDecision] = Field(
+        default_factory=list, description="매도 결정 리스트"
+    )
+    sell_result: Optional[SellResult] = Field(
+        default=None, description="매도 실행 결과"
+    )
+
+
+class SellOverallState(SellInputState, SellPrivateState, SellOutputState):
     pass
