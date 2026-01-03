@@ -1,294 +1,158 @@
-<div align="center">
-  <img src="assets/bull.png" alt="Stockelper" width="100%"/>
-</div>
+# Stockelper LLM Service
 
-# Stockelper - AI-Powered Stock Investment Platform
+LangGraph 기반 다중 에이전트 시스템을 활용한 AI 주식 분석 서비스입니다.
 
-**Stockelper**는 AI 기반의 종합 주식 투자 플랫폼으로, 초보부터 전문가까지 모든 투자자를 위한 지능형 투자 어시스턴트입니다. LangGraph 기반의 다중 에이전트 시스템과 자동화된 데이터 파이프라인을 통해 실시간 시장 분석, 기업 분석, 투자 전략 수립을 지원합니다.
+## 🚀 주요 기능
 
-## 🚀 주요 특징
+- **다중 에이전트 시스템**: SupervisorAgent가 4개의 전문 에이전트를 조율
+- **실시간 스트리밍**: Server-Sent Events (SSE)로 토큰 단위 응답
+- **한국 주식 시장 특화**: KIS API, DART, KRX 데이터 통합
+- **자동 거래 제안**: 투자 전략에 기반한 매매 액션 생성
+- **지식 그래프 통합**: Neo4j 기반 기업 관계 분석
 
-- **🤖 다중 AI 에이전트**: 시장분석, 기업분석, 기술분석, 리스크관리 전문 에이전트
-- **📊 실시간 데이터**: Airflow 기반 자동화된 뉴스/리포트 크롤링 파이프라인
-- **🔍 지능형 검색**: Neo4j 지식그래프와 벡터 데이터베이스 기반 정보 검색
-- **📈 포트폴리오 관리**: 실시간 포트폴리오 추적 및 리스크 분석
-- **🌐 오픈소스**: 완전한 오픈소스로 누구나 배포 및 커스터마이징 가능
+## 📋 기술 스택
 
-## 🏗️ 시스템 아키텍처
+- **AI/ML**: LangGraph, LangChain 1.0+, OpenAI GPT-4.5.1
+- **Web Framework**: FastAPI 0.111, Uvicorn
+- **Database**: PostgreSQL (async), Neo4j, MongoDB
+- **Data Analysis**: Prophet, ARIMA, Pandas, NumPy
+- **Observability**: LangFuse (optional)
+- **APIs**: KIS, DART, OpenRouter (Perplexity), YouTube
 
-Stockelper는 마이크로서비스 아키텍처를 기반으로 구성되어 있습니다:
+## 🤖 에이전트 시스템
 
-![Stockelper Architecture](assets/architecture.png)
+### SupervisorAgent (관리자)
+- 사용자 질의 라우팅
+- 주식 종목 식별 (한국거래소 종목명 매칭)
+- 거래 액션 생성 및 승인 요청
 
-### 핵심 컴포넌트
+### MarketAnalysisAgent (시장 분석)
+**도구:**
+- SearchNewsTool - Perplexity 뉴스 검색
+- SearchReportTool - 투자 리포트 검색
+- YouTubeSearchTool - YouTube 콘텐츠 분석
+- ReportSentimentAnalysisTool - 리포트 감정 분석
+- GraphQATool - Neo4j 관계 그래프 검색
 
-1. **LLM Server** (`llm-server/`): LangGraph 기반 다중 에이전트 시스템
-2. **Data Pipeline**: Airflow 기반 자동화된 데이터 수집 및 처리
-3. **Vector Database**: 임베딩 기반 지능형 검색 시스템
-4. **Knowledge Graph**: Neo4j 기반 관계형 데이터 분석
+### FundamentalAnalysisAgent (기본적 분석)
+**도구:**
+- AnalysisFinancialStatementTool - DART 재무제표 분석 (5년 데이터)
+  - 유동비율, 부채비율, 유보율, ROE, 이자보상배율 등
 
-## 🔀 레포/서비스 분리 (Portfolio / Backtesting)
+### TechnicalAnalysisAgent (기술적 분석)
+**도구:**
+- AnalysisStockTool - KIS API 실시간 주가/시장 정보
+- PredictStockTool - Prophet + ARIMA 앙상블 예측
+- StockChartAnalysisTool - 차트 이미지 분석
 
-본 워크스페이스에서는 `stockelper-llm`에서 **포트폴리오**와 **백테스팅** 도메인을 별도 레포로 분리했습니다:
+### InvestmentStrategyAgent (투자 전략)
+**도구:**
+- GetAccountInfoTool - KIS 계좌 잔고 조회
+- InvestmentStrategySearchTool - 투자 전략 웹 검색
 
-- **Portfolio Service**: `../stockelper-portfolio` (기본 포트: `21010`)
-- **Backtesting Service**: `../stockelper-backtesting` (기본 포트: `21011`)
+## 🔌 API 엔드포인트
 
-LLM Chat 서버는 백테스팅 요청을 로컬 백테스팅 서비스로 위임할 수 있습니다:
+### POST /stock/chat
+SSE 스트리밍 채팅 인터페이스
 
-- `STOCKELPER_BACKTESTING_URL=http://localhost:21011`
+**Request:**
+```json
+{
+  "user_id": 1,
+  "thread_id": "conversation_uuid",
+  "message": "삼성전자 투자 전략 추천해줘",
+  "human_feedback": null
+}
+```
 
-## 📋 태스크 흐름도
+**Response (SSE Stream):**
+- Progress events: `{"type": "progress", "step": "agent_name", "status": "start|end"}`
+- Delta events: `{"type": "delta", "token": "..."}`
+- Final response: 완전한 메시지 + trading_action + subgraph
+- Done marker: `[DONE]`
 
-사용자 질문이 다양한 에이전트를 통해 처리되는 과정:
+### GET /health
+헬스 체크
 
-![Task Flow](assets/task_flow.png)
+## 🗄️ 데이터베이스
 
-## 👤 사용자 흐름도
+### PostgreSQL (3개 데이터베이스)
+- **llm_users**: 사용자 데이터 (KIS 자격증명 포함)
+- **checkpoint**: LangGraph 상태 체크포인트
+- **ksic**: 한국 산업 분류
 
-### 기본 사용자 흐름
-![User Flow 1](assets/user_flow1.png)
+### Neo4j
+- 기업 관계 그래프 (경쟁사, 섹터)
 
-### 상세 사용자 흐름
-![User Flow 2](assets/user_flow2.png)
+### MongoDB (Optional)
+- 문서 저장소
 
-## 🤖 AI 에이전트 시스템
+## ⚙️ 환경 변수
 
-### 1. SupervisorAgent (관리자 에이전트)
-- 사용자 질문 분석 및 작업 할당
-- 에이전트 간 협업 조율
-- 최종 응답 생성 및 품질 관리
-- 실제 거래 실행 결정
-
-### 2. MarketAnalysisAgent (시장 분석 에이전트)
-- 실시간 시장 동향 분석
-- 뉴스 감성 분석 및 요약
-- 섹터별 시장 분석
-- 유튜브/소셜미디어 트렌드 분석
-- 지식그래프 기반 관계 분석
-
-### 3. FundamentalAnalysisAgent (기업 분석 에이전트)
-- 재무제표 심층 분석
-- 기업 가치 평가 (DCF, PER, PBR 등)
-- 경쟁사 비교 분석
-- ESG 및 지배구조 분석
-- DART 공시 정보 분석
-
-### 4. TechnicalAnalysisAgent (기술 분석 에이전트)
-- 차트 패턴 인식 및 분석
-- 기술적 지표 계산 (RSI, MACD, 볼린저밴드 등)
-- 지지/저항선 분석
-- 거래량 분석
-- 매매 타이밍 추천
-
-### 5. PortfolioAnalysisAgent (포트폴리오 분석 에이전트)
-- 포트폴리오 구성 최적화
-- 리스크 분산 분석
-- 수익률 시뮬레이션
-
-### 6. InvestmentStrategyAgent (투자 전략 에이전트)
-- 개인화된 투자 전략 수립
-- 리스크 프로파일 기반 추천
-- 장기/단기 투자 계획
-- 세금 최적화 전략
-- KIS API 연동 실제 거래 실행
-
-## 🤖 AI 에이전트 도구
-### MarketAnalysisAgent Tools
-- SearchNewsTool: Perplexity를 사용하여 관련 뉴스를 검색합니다.
-- SearchReportTool: MongoDB에서 종목 관련 투자 리포트를 검색합니다.
-- ReportSentimentAnalysisTool: LLM을 통해 투자 리포트의 감정을 분석합니다.
-- YouTubeSearchTool: YouTube의 주식 관련 콘텐츠를 검색합니다.
-- GraphQATool: Neo4j에서 인물, 경쟁사등의 관계 데이터를 검색합니다.
-### FundamentalAnalysisAgent Tools
-- AnalysisFinancialStatementTool: Dart에서 회사 재무제표를 분석합니다.
-### TechnicalAnalysisAgent Tools
-- AnalysisStockTool: kis에서 종합적인 주식 정보 검색합니다.
-- StockChartAnalysisTool: 차트이미지를 생성하고 multi-modal로 분석합니다
-- PredictStockTool: Prophet과 ARIMA를 활용해 주가 변동을 예측합니다.
-### PortfolioAnalysisAgent Tools
-- PortfolioAnalysisTool: 포트폴리오 성능을 분석하고, 자산 배분을 최적화하며, 위험을 평가합니다.
-### InvestmentStrategyAgent Tools
-- GetAccountInfoTool: 사용자 계정 정보를 조회합니다.
-- InvestmentStrategySearchTool: Perplexity를 사용하여 관련 투자 전략을 검색합니다.
-
-## 🚀 빠른 시작
-
-### Docker Compose 실행
 ```bash
-docker network create stockelper
-docker compose up --build -d
+# AI 서비스
+OPENAI_API_KEY=                   # OpenAI GPT-4.5.1
+OPENROUTER_API_KEY=               # Perplexity/OpenRouter
+OPEN_DART_API_KEY=                # 한국 금융감독원
+YOUTUBE_API_KEY=                  # YouTube 검색
+
+# 한국투자증권 (KIS)
+KIS_APP_KEY=
+KIS_APP_SECRET=
+KIS_ACCOUNT_NO=                   # 형식: "50132452-01"
+
+# 데이터베이스
+ASYNC_DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/llm_users
+CHECKPOINT_DATABASE_URI=postgresql://user:pass@host:5432/checkpoint
+ASYNC_DATABASE_URL_KSIC=postgresql+asyncpg://user:pass@host:5432/ksic
+
+# Neo4j
+NEO4J_URI=neo4j://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=password
+
+# Redis
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_AUTH=password
+
+# LangFuse (선택사항)
+LANGFUSE_ENABLED=true/false
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_HOST=http://localhost:21003
+
+# 서비스 설정
+STOCKELPER_SERVICE=chat           # "chat" 또는 "all"
+STOCKELPER_BACKTESTING_URL=       # 백테스팅 서비스 URL (선택)
 ```
 
-> 참고: Docker 이미지 내부에서 Python 의존성 설치는 pip가 아닌 Astral uv로 수행됩니다. 사용자는 별도 조치 없이 위 명령만 실행하면 됩니다.
+## 🐳 Docker 실행
 
-### 모의투자 계정 업로드
 ```bash
-docker compose exec llm-server uv run python src/upload_user.py
+# 모든 서비스 시작
+docker-compose -f local.docker-compose.yml up -d
+
+# LangFuse 포함
+docker-compose -f local.docker-compose.yml --profile langfuse up -d
+
+# 로그 확인
+docker-compose logs -f llm-server
 ```
 
-### KSIC 한국표준산업분류 데이터 업로드
-```bash
-docker compose exec llm-server uv run python src/upload_industy.py
-```
+### 서비스 포트
+- LLM Server: 21009
+- PostgreSQL: 5432
+- Redis: 6379
+- LangFuse: 21003 (optional)
 
-### 프론트엔드 실행 (테스트용)
-```bash
-streamlit run src/frontend/streamlit_app.py
-```
+## 🔒 보안
 
-## 📁 프로젝트 구조
+- 모든 API 키를 환경 변수로 관리
+- KIS 토큰 자동 갱신 (PostgreSQL 저장)
+- `.env` 파일 절대 커밋 금지
 
-```
-Stockelper/
-├── 📁 src/                      # 소스 코드
-│   ├── __init__.py
-│   ├── main.py                  # 메인 FastAPI 애플리케이션
-│   ├── upload_user.py           # 사용자 모의 투자 계정 업로드
-│   ├── 📁 multi_agent/          # 멀티 에이전트 시스템
-│   │   ├── __init__.py          # 멀티 에이전트 객체 생성
-│   │   ├── utils.py             # postgresql users table schema, kis 관련 함수, 유틸리티 함수
-│   │   ├── 📁 base/             # Agent base class
-│   │   │   ├── __init__.py
-│   │   │   └── analysis_agent.py    # Anaysis agent base class
-│   │   ├── 📁 supervisor_agent/
-│   │   │   ├── __init__.py
-│   │   │   ├── agent.py             # SupervisorAgent Workflow
-│   │   │   └── prompt.py            # prompt
-│   │   ├── 📁 market_analysis_agent/  #  MarketAnalysisAgent
-│   │   │   ├── __init__.py          # object instantiation
-│   │   │   ├── agent.py             # workflow
-│   │   │   ├── prompt.py            # prompt
-│   │   │   └── 📁 tools/
-│   │   │       ├── __init__.py
-│   │   │       ├── graph_qa.py      # 지식 그래프 검색 도구
-│   │   │       ├── news.py          # 뉴스 검색 도구
-│   │   │       ├── report.py        # 투자 리포트 검색 도구
-│   │   │       ├── sentiment.py     # 리포트 감정 분석 도구
-│   │   │       └── youtube_tool.py  # YouTube 검색 도구
-│   │   ├── 📁 fundamental_analysis_agent/   # FundamentalAnalysisAgent
-│   │   │   ├── __init__.py          # object instantiation
-│   │   │   ├── agent.py             # workflow
-│   │   │   ├── prompt.py            # prompt
-│   │   │   └── 📁 tools/
-│   │   │       ├── __init__.py
-│   │   │       └── dart.py          # 재무제표 분석 도구
-│   │   ├── 📁 technical_analysis_agent/     # TechnicalAnalysisAgent
-│   │   │   ├── __init__.py          # object instantiation
-│   │   │   ├── agent.py             # workflow
-│   │   │   ├── prompt.py            # prompt
-│   │   │   └── 📁 tools/
-│   │   │       ├── __init__.py
-│   │   │       ├── chart_analysis_tool.py   # 주식 차트 이미지 분석 도구
-│   │   │       └── stock.py         # 주식 정보 및 기술적 분석 도구
-│   │   ├── 📁 portfolio_analysis_agent/     # PortfolioAnalysisAgent
-│   │   │   ├── __init__.py          # object instantiation
-│   │   │   ├── agent.py             # workflow
-│   │   │   ├── prompt.py            # prompt
-│   │   │   └── 📁 tools/
-│   │   │       ├── __init__.py
-│   │   │       └── portfolio.py     # 포트폴리오 분석 도구
-│   │   └── 📁 investment_strategy_agent/    # InvestmentStrategyAgent
-│   │       ├── __init__.py          # object instantiation
-│   │       ├── agent.py             # workflow
-│   │       ├── prompt.py            # prompt
-│   │       └── 📁 tools/
-│   │           ├── __init__.py
-│   │           ├── account.py       # 계정 정보 조회 도구
-│   │           └── search.py        # 투자 전략 검색 도구
-│   ├── 📁 routers/                  # API 라우터
-│   │   ├── __init__.py              # 라우터 내보내기
-│   │   ├── base.py                  # 기본 엔드포인트
-│   │   ├── models.py                # API 요청/응답 모델
-│   │   └── stock.py                 # 주식 관련 엔드포인트
-│   └── 📁 frontend/                 # 프론트엔드
-│       ├── __init__.py
-│       └── streamlit_app.py         # Streamlit 웹 인터페이스
-├── .dockerignore
-├── .env.example                     # api key
-├── .gitignore
-├── docker-compose.yml               # Docker Compose 설정
-├── Dockerfile                       # Docker 이미지 설정
-├── init-multiple-db.sh              # 데이터베이스 초기화 스크립트
-├── LICENSE
-├── README.md
-├── requirements.txt                 # Python 의존성
-└── 📁 assets                        # 문서 이미지 및 자료
-```
+## 📞 문의
 
-## 🔧 기술 스택
-
-### AI/ML
-- **LangGraph**: 다중 에이전트 워크플로우
-- **LangChain**: LLM 애플리케이션 프레임워크
-- **OpenAI GPT**: 주요 언어 모델
-- **Anthropic Claude**: 보조 언어 모델
-- **HuggingFace**: 임베딩 모델
-
-### 데이터베이스
-- **PostgreSQL**: 사용자 데이터 및 체크포인트
-- **Neo4j**: 지식 그래프
-- **MongoDB**: 문서 저장소
-
-### 인프라
-- **Docker**: 컨테이너화
-- **FastAPI**: API 서버
-- **Apache Airflow**: 데이터 파이프라인
-- **Langfuse**: AI 관찰성 및 모니터링
-
-### 외부 API
-- **KIS API**: 한국투자증권 거래 API
-- **DART API**: 금융감독원 공시 시스템
-- **FinanceDataReader**: 금융 데이터
-- **Tavily**: 웹 검색
-- **YouTube API**: 동영상 콘텐츠
-
-## 🔑 필수 API 키 (.env)
-
-### AI 서비스
-- `OPENAI_API_KEY`: OpenAI GPT 모델
-- `OPENROUTER_API_KEY`: perplexity
-
-### 데이터 서비스
-- `OPEN_DART_API_KEY`: 기업 재무제표
-- `MONGO_URI`: 투자 리포트
-- `YOUTUBE_API_KEY`: 유튜브 스크립트
-- `NEO4J_URI`: Neo4j 데이터베이스
-- `NEO4J_USER`: Neo4j 사용자명
-- `NEO4J_PASSWORD`: Neo4j 비밀번호
-- `KIS_APP_KEY`: 한국투자증권 앱 키
-- `KIS_APP_SECRET`: 한국투자증권 앱 시크릿
-- `KIS_ACCOUNT_NO`: 한국투자증권 가상 계좌번호
-
-## 📄 라이선스
-
-이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
-
-## 후원사
-
-아래는 Stockelper 프로젝트를 지원해주시는 후원사 목록입니다.
-
-<table>
-  <tr>
-    <td align="center" width="25%">
-      <a href="#">
-        <img src="assets/kis.png" alt="KIS" width="180"/>
-      </a>
-    </td>
-    <td align="center" width="25%">
-      <a href="#">
-        <img src="assets/naver-cloud-platform.png.png" alt="Naver Cloud Platform" width="180"/>
-      </a>
-    </td>
-    <td align="center" width="25%">
-      <a href="#">
-        <img src="assets/telepix.png" alt="Telepix" width="180"/>
-      </a>
-    </td>
-    <td align="center" width="25%">
-      <a href="#">
-        <img src="assets/pseudolab.png" alt="PseudoLab" width="180"/>
-      </a>
-    </td>
-  </tr>
-</table>
+- Issues: GitHub Issues 탭
+- 기여: Pull Request 환영
