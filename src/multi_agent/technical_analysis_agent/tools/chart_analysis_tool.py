@@ -316,7 +316,7 @@ class StockChartAnalysisTool(BaseTool):
     description: str = """
     한국 주식의 기술적 차트를 생성하고 AI를 통해 차트 패턴, 추세, 기술적 지표를 분석합니다.
     볼린저 밴드, 이동평균선, MACD, RSI, 스토캐스틱 등의 기술 지표를 포함한 차트를 생성하고
-    GPT-4를 통해 차트의 패턴과 가능한 가격 움직임을 자세히 분석합니다.
+    GPT-5.1을 통해 차트의 패턴과 가능한 가격 움직임을 자세히 분석합니다.
     """
     args_schema: Type[BaseModel] = StockChartAnalysisInput
     analyzer: StockChartAnalyzer
@@ -324,7 +324,7 @@ class StockChartAnalysisTool(BaseTool):
 
     def __init__(self, async_database_url: str):
         llm = ChatOpenAI(
-            model="gpt-4.1-mini",
+            model="gpt-5.1",
             max_tokens=32768,
             temperature=0
         ) 

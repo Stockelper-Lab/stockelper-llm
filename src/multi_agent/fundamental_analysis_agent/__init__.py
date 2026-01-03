@@ -4,7 +4,7 @@ from .tools import *
 
 
 agent = FundamentalAnalysisAgent(
-    model="gpt-4.1-mini",
+    model="gpt-5.1",
     tools=[
         AnalysisFinancialStatementTool(),
     ],
