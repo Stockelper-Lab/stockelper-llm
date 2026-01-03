@@ -7,7 +7,7 @@ def build_agent(async_database_url: str):
     if not async_database_url:
         raise ValueError("async_database_url 가 필요합니다.")
     return TechnicalAnalysisAgent(
-        model="gpt-4.1-mini",
+        model="gpt-5.1",
         tools=[
             AnalysisStockTool(async_database_url=async_database_url),
             PredictStockTool(),

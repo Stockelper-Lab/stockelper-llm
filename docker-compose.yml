@@ -25,6 +25,8 @@ services:
       - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/llm_users
       - ASYNC_DATABASE_URL_KSIC=postgresql+asyncpg://postgres:postgres@db:5432/ksic
       - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
+      # 컨테이너 분리: Chat API만 제공
+      - STOCKELPER_SERVICE=chat
       - LANGFUSE_HOST=http://langfuse-web:3000
       - LANGFUSE_PUBLIC_KEY=abcde
       - LANGFUSE_SECRET_KEY=abcde

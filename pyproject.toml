@@ -19,6 +19,8 @@ dependencies = [
     "asyncpg",
     "psycopg[binary]==3.2.*",
     "sqlalchemy>=2.0",
+    "langchain>=1.0.0",
+    "langchain-classic>=1.0.0",
     "langgraph",
     "langfuse",
     "langgraph-checkpoint-postgres",
@@ -39,6 +41,8 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = [
+    "langchain>=1.0.0",
+    "langchain-classic>=1.0.0",
     "langgraph",
     "langchain-community", 
     "langchain-openai",

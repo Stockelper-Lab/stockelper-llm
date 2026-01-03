@@ -1,23 +1,58 @@
 import os
 import json
 import logging
+import re
+import httpx
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
-from langfuse.langchain import CallbackHandler
 
 from multi_agent import get_multi_agent
+from langchain_compat import iter_stream_tokens, message_to_text
 from .models import ChatRequest, StreamingStatus, FinalResponse
 
 logger = logging.getLogger(__name__)
 
-langfuse_handler = CallbackHandler()
+_LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "true").lower() not in {"0", "false", "no"}
+_BACKTESTING_SERVICE_URL = os.getenv("STOCKELPER_BACKTESTING_URL", "").strip()
+
+# LangChain v1에서 langfuse.langchain 통합이 깨질 수 있어(legacy import 의존),
+# Langfuse는 옵션으로만 활성화한다.
+_langfuse_handler = None
+if _LANGFUSE_ENABLED:
+    try:
+        from langfuse.langchain import CallbackHandler  # type: ignore
+
+        _langfuse_handler = CallbackHandler()
+    except Exception:
+        _langfuse_handler = None
 
 CHECKPOINT_DATABASE_URI = os.getenv("CHECKPOINT_DATABASE_URI")
 
 router = APIRouter(prefix="/stock", tags=["stock"])
+
+_PORTFOLIO_BLOCK_PAT = re.compile(r"(포트폴리오\s*추천|자산\s*배분|리밸런싱)", re.IGNORECASE)
+_BACKTEST_PAT = re.compile(r"(백테스트|백테스팅|backtest|backtesting)", re.IGNORECASE)
+
+
+def _is_portfolio_recommendation_request(text: str) -> bool:
+    return bool(_PORTFOLIO_BLOCK_PAT.search(text or ""))
+
+
+def _is_backtest_request(text: str) -> bool:
+    return bool(_BACKTEST_PAT.search(text or ""))
+
+
+async def generate_simple_sse(message: str):
+    """멀티에이전트를 실행하지 않는 단순 SSE 응답(차단/가이드/즉시응답)."""
+    final_response = FinalResponse(type="final", message=message, subgraph={}, trading_action=None)
+    for token in iter_stream_tokens(message):
+        yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
+    yield f"data: {json.dumps(final_response.model_dump(), ensure_ascii=False)}\n\n"
+    yield "data: [DONE]\n\n"
+
 
 async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
     """풀의 생명주기를 스트리밍과 맞춰 관리하는 SSE 응답 생성기"""
@@ -35,7 +70,7 @@ async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
             
             # config 구성
             config = {
-                "callbacks": [langfuse_handler],
+                "callbacks": ([_langfuse_handler] if _langfuse_handler is not None else []),
                 "metadata": {
                     "langfuse_session_id": thread_id,
                     "langfuse_user_id": user_id,
@@ -63,17 +98,10 @@ async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
                     
                 elif response_type == "values":
                     # 최종 메시지를 토큰 단위(delta)로 스트리밍 후 마지막에 final 전송
-                    message_text = response.get("messages", [{}])[-1].content
-                    if isinstance(message_text, str):
-                        # 한글 문자 단위 대신 단어 단위로 스트리밍
-                        import re
-                        # 한글, 영문, 숫자, 공백, 특수문자를 적절히 분리
-                        tokens = re.findall(r'[\w가-힣]+|[^\w가-힣\s]|\s+', message_text)
-                        for token in tokens:
-                            if token.strip():  # 빈 토큰 제외
-                                yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
-                    else:
-                        message_text = ""
+                    last_msg = response.get("messages", [])[-1] if response.get("messages") else None
+                    message_text = message_to_text(last_msg)
+                    for token in iter_stream_tokens(message_text):
+                        yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
 
                     final_response = FinalResponse(
                         type="final",
@@ -110,6 +138,92 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
 
         # 입력 상태 구성
         if human_feedback is None:
+            # 요구사항: 포트폴리오 추천은 챗봇에서 실행하지 않음(전용 페이지로 유도)
+            if _is_portfolio_recommendation_request(query):
+                guide = (
+                    "포트폴리오 추천 기능은 챗봇에서 실행하지 않습니다.\n"
+                    "포트폴리오 추천 페이지에서 버튼을 눌러 실행해주세요."
+                )
+                return StreamingResponse(
+                    generate_simple_sse(guide),
+                    media_type="text/event-stream; charset=utf-8",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Content-Type": "text/event-stream; charset=utf-8",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
+            # 요구사항: 백테스팅은 챗봇에서 '실행중' 안내 후, 완료 알림으로 별도 전달
+            if _is_backtest_request(query):
+                if not _BACKTESTING_SERVICE_URL:
+                    msg = (
+                        "백테스팅 기능은 별도 서비스로 분리되어 있습니다.\n"
+                        "백테스팅 서버를 실행한 뒤, 환경변수 STOCKELPER_BACKTESTING_URL을 설정해주세요.\n"
+                        "예) STOCKELPER_BACKTESTING_URL=http://localhost:21011"
+                    )
+                    return StreamingResponse(
+                        generate_simple_sse(msg),
+                        media_type="text/event-stream; charset=utf-8",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "Content-Type": "text/event-stream; charset=utf-8",
+                            "X-Accel-Buffering": "no",
+                        },
+                    )
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            f"{_BACKTESTING_SERVICE_URL.rstrip('/')}/api/backtesting/execute",
+                            json={
+                                "user_id": user_id,
+                                "stock_symbol": None,
+                                "strategy_type": None,
+                                "query": query,
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        job_id = data.get("job_id") or data.get("jobId")
+                except Exception as e:
+                    logger.warning(
+                        "Failed to enqueue backtest via STOCKELPER_BACKTESTING_URL=%s: %s",
+                        _BACKTESTING_SERVICE_URL,
+                        e,
+                    )
+                    msg = (
+                        "백테스팅 요청에 실패했습니다.\n"
+                        "백테스팅 서버 상태를 확인한 뒤 다시 시도해주세요."
+                    )
+                    return StreamingResponse(
+                        generate_simple_sse(msg),
+                        media_type="text/event-stream; charset=utf-8",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "Content-Type": "text/event-stream; charset=utf-8",
+                            "X-Accel-Buffering": "no",
+                        },
+                    )
+
+                msg = (
+                    f"백테스팅을 시작했습니다. (job_id={job_id})\n"
+                    "약 5~10분 정도 소요될 수 있으며, 완료되면 알림으로 알려드릴게요."
+                )
+                return StreamingResponse(
+                    generate_simple_sse(msg),
+                    media_type="text/event-stream; charset=utf-8",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Content-Type": "text/event-stream; charset=utf-8",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
             input_state = {"messages": [{"role": "user", "content": query}]}
         else:
             input_state = Command(resume=human_feedback)

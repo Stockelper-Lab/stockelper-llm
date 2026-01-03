@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from dataclasses import asdict, dataclass, field
 from typing import Annotated
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, interrupt
 from langgraph.graph import StateGraph
@@ -18,11 +18,12 @@ import functools
 from sqlalchemy.ext.asyncio import create_async_engine
 from .prompt import SYSTEM_TEMPLATE, TRADING_SYSTEM_TEMPLATE, STOCK_NAME_USER_TEMPLATE, STOCK_CODE_USER_TEMPLATE
 from ..utils import place_order, get_user_kis_credentials, get_access_token, update_user_kis_credentials, custom_add_messages
+from langchain_compat import message_to_text
 
 
 class Router(BaseModel):
     target: str = Field(
-        description="The target of the message, either 'User' or 'MarketAnalysisAgent' or 'FundamentalAnalysisAgent' or 'TechnicalAnalysisAgent' or 'InvestmentStrategyAgent' or 'PortfolioAnalysisAgent'"
+        description="The target of the message, either 'User' or 'MarketAnalysisAgent' or 'FundamentalAnalysisAgent' or 'TechnicalAnalysisAgent' or 'InvestmentStrategyAgent'"
     )
     message: str = Field(description="The message in korean to be sent to the target")
 
@@ -105,12 +106,6 @@ class SupervisorAgent:
             and state.agent_results[-1]["target"] == "InvestmentStrategyAgent"
         ):
             update, goto = await self.trading(state, config)
-        elif (
-            state.agent_results
-            and state.execute_agent_count > 0
-            and state.agent_results[-1]["target"] == "PortfolioAnalysisAgent"
-        ):
-            update, goto = await self.routing_user(state, config)
         else:
             update, goto = await self.routing(state, config)
         
@@ -163,7 +158,7 @@ class SupervisorAgent:
         agent_results = []
         for router, result in results:
             agent_results.append(
-                router | {"result": result['messages'][-1].content}
+                router | {"result": message_to_text(result["messages"][-1]) if result.get("messages") else ""}
             )
 
         update = {
@@ -294,10 +289,13 @@ class SupervisorAgent:
     async def trading(self, state, config):
         result = state.agent_results[-1]["result"]
         trading_messages = [
-            {
-                "role": "system",
-                "content": TRADING_SYSTEM_TEMPLATE.format(stock_code=state.stock_code) + "\n" + "<Investment_Report>\n" + result + "\n</Investment_Report>",
-            }
+            SystemMessage(
+                content=TRADING_SYSTEM_TEMPLATE.format(stock_code=state.stock_code)
+                + "\n"
+                + "<Investment_Report>\n"
+                + result
+                + "\n</Investment_Report>"
+            )
         ]
         trading_action = await self.llm_with_trading.ainvoke(trading_messages)
         messages = [AIMessage(content=result + "\n\n아래 주문 정보를 수락하겠습니까?\n" + trading_action.model_dump_json())]
@@ -313,9 +311,16 @@ class SupervisorAgent:
             )
         else:
             agent_results_str = "[]"
-        human_message = [HumanMessage(content=f"<user>\n{state.messages[-1].content}\n<user>\n\n<agent_analysis_result>\n{agent_results_str}\n<agent_analysis_result>")]
+        human_message = [
+            HumanMessage(
+                content=(
+                    f"<user>\n{message_to_text(state.messages[-1])}\n</user>\n\n"
+                    f"<agent_analysis_result>\n{agent_results_str}\n</agent_analysis_result>"
+                )
+            )
+        ]
 
-        messages = [{"role": "system", "content": SYSTEM_TEMPLATE}] + state.messages[:-1] + human_message
+        messages = [SystemMessage(content=SYSTEM_TEMPLATE)] + state.messages[:-1] + human_message
 
         tasks = []
         if state.execute_agent_count == 0:
@@ -333,7 +338,17 @@ class SupervisorAgent:
         stock_name = state.stock_name if stock_info["stock_name"] == "None" else stock_info["stock_name"]
         stock_code = state.stock_code if stock_info["stock_code"] == "None" else stock_info["stock_code"]
 
-        if router_info.routers[0].target == "User":
+        # 안전장치: 존재하지 않는 agent로 라우팅되면 User 응답으로 폴백
+        if router_info.routers[0].target not in self.agents_by_name and router_info.routers[0].target != "User":
+            update = State(
+                messages=[AIMessage(content="요청하신 기능은 챗봇에서 직접 실행할 수 없습니다. 관련 페이지에서 실행해주세요.")],
+                agent_results=state.agent_results,
+                subgraph=subgraph,
+                stock_name=stock_name,
+                stock_code=stock_code,
+            )
+            goto = "__end__"
+        elif router_info.routers[0].target == "User":
             update = State(
                 messages=[AIMessage(content=router_info.routers[0].message)],
                 agent_results=state.agent_results,

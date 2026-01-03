@@ -4,7 +4,7 @@ from .tools import *
 
 
 agent = MarketAnalysisAgent(
-    model="gpt-4.1-mini",
+    model="gpt-5.1",
     tools=[
         SearchNewsTool(),
         SearchReportTool(),

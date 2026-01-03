@@ -21,6 +21,8 @@ services:
       - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/llm_users
       - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/llm_users
       - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
+      # 컨테이너 분리: Chat API만 제공
+      - STOCKELPER_SERVICE=chat
       - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
       - REQUESTS_TIMEOUT=300
       # LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are loaded from .env.cloud
@@ -41,7 +43,7 @@ services:
       POSTGRES_PASSWORD: postgres # CHANGEME
       POSTGRES_DB: postgres
     ports:
-      - 5432:5432
+      - 21000:5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-multiple-db.sh:/docker-entrypoint-initdb.d/init-multiple-db.sh:ro

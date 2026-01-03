@@ -4,7 +4,7 @@
 version: '3.8'
 
 services:
-  # Main LLM Server
+  # Chat API Server (LLM)
   llm-server:
     container_name: stockelper-llm-server
     build: .
@@ -20,7 +20,12 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/llm_users
       - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/llm_users
+      - ASYNC_DATABASE_URL_KSIC=postgresql+asyncpg://postgres:postgres@db:5432/ksic
       - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
+      # 컨테이너 분리: Chat API만 제공 (/stock)
+      - STOCKELPER_SERVICE=chat
+      # 분리된 Backtesting 서비스 호출(선택)
+      - STOCKELPER_BACKTESTING_URL=${STOCKELPER_BACKTESTING_URL:-http://stockelper-backtesting-server:21011}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_AUTH=myredissecret
@@ -30,7 +35,7 @@ services:
     env_file:
       - .env
     networks:
-      - stockelper-local
+      - stockelper
     restart: unless-stopped
 
   # PostgreSQL Database
@@ -52,7 +57,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - stockelper-local
+      - stockelper
     restart: unless-stopped
 
   # Redis for caching
@@ -70,7 +75,7 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - stockelper-local
+      - stockelper
     restart: unless-stopped
 
   # Optional: Langfuse for observability (can be disabled for basic local dev)
@@ -91,7 +96,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - stockelper-local
+      - stockelper
     restart: unless-stopped
     profiles:
       - langfuse
@@ -125,7 +130,7 @@ services:
       retries: 3
       start_period: 60s
     networks:
-      - stockelper-local
+      - stockelper
     restart: unless-stopped
     profiles:
       - langfuse
@@ -139,6 +144,6 @@ volumes:
     driver: local
 
 networks:
-  stockelper-local:
+  stockelper:
     driver: bridge
-    name: stockelper-local
+    name: stockelper

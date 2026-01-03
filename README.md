@@ -27,6 +27,17 @@ Stockelper는 마이크로서비스 아키텍처를 기반으로 구성되어 �
 3. **Vector Database**: 임베딩 기반 지능형 검색 시스템
 4. **Knowledge Graph**: Neo4j 기반 관계형 데이터 분석
 
+## 🔀 레포/서비스 분리 (Portfolio / Backtesting)
+
+본 워크스페이스에서는 `stockelper-llm`에서 **포트폴리오**와 **백테스팅** 도메인을 별도 레포로 분리했습니다:
+
+- **Portfolio Service**: `../stockelper-portfolio` (기본 포트: `21010`)
+- **Backtesting Service**: `../stockelper-backtesting` (기본 포트: `21011`)
+
+LLM Chat 서버는 백테스팅 요청을 로컬 백테스팅 서비스로 위임할 수 있습니다:
+
+- `STOCKELPER_BACKTESTING_URL=http://localhost:21011`
+
 ## 📋 태스크 흐름도
 
 사용자 질문이 다양한 에이전트를 통해 처리되는 과정:
