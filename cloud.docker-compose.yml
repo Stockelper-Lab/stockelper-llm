@@ -1,7 +1,9 @@
 services:
   llm-server:
-    container_name: llm-server
-    build: .
+    image: stockelper-llm-server:latest
+    container_name: stockelper-llm-server
+    build:
+      context: .
     ports:
       - "21009:21009"
     depends_on:
@@ -43,7 +45,7 @@ services:
       POSTGRES_PASSWORD: postgres # CHANGEME
       POSTGRES_DB: postgres
     ports:
-      - 21000:5432
+      - 5432:5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-multiple-db.sh:/docker-entrypoint-initdb.d/init-multiple-db.sh:ro
