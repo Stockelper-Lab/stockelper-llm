@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from .prompt import SYSTEM_TEMPLATE, TRADING_SYSTEM_TEMPLATE, STOCK_NAME_USER_TEMPLATE, STOCK_CODE_USER_TEMPLATE
 from ..utils import place_order, get_user_kis_credentials, get_access_token, update_user_kis_credentials, custom_add_messages
 from langchain_compat import message_to_text
+from json_safety import to_jsonable
 
 logger = logging.getLogger(__name__)
 
@@ -283,10 +284,10 @@ class SupervisorAgent:
             result = session.run(query, stock_name=stock_name)
             record = result.single()
             if record:
-                return {
+                return to_jsonable({
                     "node": record["nodes"],
                     "relation": record["relations"]
-                }
+                })
             return {}
     
     async def trading(self, state, config):
