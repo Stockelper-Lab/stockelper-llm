@@ -12,7 +12,7 @@ LangGraph 기반 다중 에이전트 시스템을 활용한 AI 주식 분석 서
 
 ## 📋 기술 스택
 
-- **AI/ML**: LangGraph, LangChain 1.0+, OpenAI GPT-4.5.1
+- **AI/ML**: LangGraph, LangChain 1.0+, OpenAI GPT-5.1
 - **Web Framework**: FastAPI 0.111, Uvicorn
 - **Database**: PostgreSQL (async), Neo4j, MongoDB
 - **Data Analysis**: Prophet, ARIMA, Pandas, NumPy
@@ -77,7 +77,7 @@ SSE 스트리밍 채팅 인터페이스
 ## 🗄️ 데이터베이스
 
 ### PostgreSQL (3개 데이터베이스)
-- **llm_users**: 사용자 데이터 (KIS 자격증명 포함)
+- **stockelper_web**: 사용자 데이터 (`users` 테이블: KIS 자격증명/토큰/계좌 포함)
 - **checkpoint**: LangGraph 상태 체크포인트
 - **ksic**: 한국 산업 분류
 
@@ -89,21 +89,27 @@ SSE 스트리밍 채팅 인터페이스
 
 ## ⚙️ 환경 변수
 
+`env.example`를 `.env`로 복사한 뒤 값을 채워서 사용하세요. (`.env`는 커밋 금지)
+
 ```bash
 # AI 서비스
-OPENAI_API_KEY=                   # OpenAI GPT-4.5.1
+OPENAI_API_KEY=                   # OpenAI (예: GPT-5.1)
 OPENROUTER_API_KEY=               # Perplexity/OpenRouter
 OPEN_DART_API_KEY=                # 한국 금융감독원
 YOUTUBE_API_KEY=                  # YouTube 검색
 
 # 한국투자증권 (KIS)
-KIS_APP_KEY=
-KIS_APP_SECRET=
-KIS_ACCOUNT_NO=                   # 형식: "50132452-01"
+# NOTE: 사용자별 kis_app_key/kis_app_secret/account_no/kis_access_token 은
+# stockelper_web.users 테이블에서 user_id로 조회/갱신합니다.
+KIS_BASE_URL=https://openapivts.koreainvestment.com:29443   # (선택) 기본값: 모의투자(VTS)
+KIS_TR_ID_BALANCE=VTTC8434R                                 # (선택) 모의/실전 전환 시 override
+KIS_TR_ID_ORDER_BUY=VTTC0802U                               # (선택)
+KIS_TR_ID_ORDER_SELL=VTTC0011U                              # (선택)
 
 # 데이터베이스
-ASYNC_DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/llm_users
-CHECKPOINT_DATABASE_URI=postgresql://user:pass@host:5432/checkpoint
+DATABASE_URL=postgresql://user:pass@host:5432/stockelper_web
+ASYNC_DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/stockelper_web  # (선택) 미지정 시 DATABASE_URL로부터 자동 변환
+CHECKPOINT_DATABASE_URI=postgresql://user:pass@host:5432/checkpoint          # (선택) 미지정 시 DATABASE_URL을 사용
 ASYNC_DATABASE_URL_KSIC=postgresql+asyncpg://user:pass@host:5432/ksic
 
 # Neo4j

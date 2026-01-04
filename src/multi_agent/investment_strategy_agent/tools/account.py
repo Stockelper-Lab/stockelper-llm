@@ -1,18 +1,20 @@
-import os
-from typing import Type, Optional
-from langchain_core.tools import BaseTool
+import asyncio
+from typing import Optional
+
 from langchain_core.callbacks import (
     AsyncCallbackManagerForToolRun,
     CallbackManagerForToolRun,
 )
-from langchain_core.vectorstores import VectorStore
 from langchain_core.runnables import RunnableConfig
-from pydantic import BaseModel, Field
-import dotenv
-import asyncio
+from langchain_core.tools import BaseTool
 from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy import create_engine
-from multi_agent.utils import get_user_kis_credentials, get_access_token, check_account_balance, update_user_kis_credentials, Base
+
+from multi_agent.utils import (
+    check_account_balance,
+    get_access_token,
+    get_user_kis_credentials,
+    update_user_kis_credentials,
+)
 
 
 class GetAccountInfoTool(BaseTool):
@@ -26,18 +28,6 @@ class GetAccountInfoTool(BaseTool):
         super().__init__(
             async_engine=create_async_engine(async_database_url, echo=False)
         )
-        # 테이블 존재 확인 및 생성 (동기 방식)
-        self._create_table_if_not_exists(async_database_url)
-    
-    def _create_table_if_not_exists(self, async_database_url: str):
-        """users 테이블이 존재하지 않으면 생성 (동기 방식)"""
-        # 비동기 URL을 동기 URL로 변환 (psycopg3 사용)
-        sync_database_url = async_database_url.replace('+asyncpg', '+psycopg').replace('postgresql+asyncpg', 'postgresql+psycopg')
-        
-        # 동기 엔진으로 테이블 생성
-        sync_engine = create_engine(sync_database_url, echo=False)
-        Base.metadata.create_all(sync_engine)
-        sync_engine.dispose()
 
     def _run(self, config: RunnableConfig, run_manager: Optional[CallbackManagerForToolRun] = None):
         return asyncio.run(self._arun(config, run_manager))

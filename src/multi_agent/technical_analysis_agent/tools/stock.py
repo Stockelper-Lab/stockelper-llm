@@ -17,10 +17,16 @@ from statsmodels.tsa.arima.model import ARIMA
 import numpy as np
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from multi_agent.utils import get_user_kis_credentials, get_access_token, check_account_balance, update_user_kis_credentials, Base
+from multi_agent.utils import (
+    KIS_BASE_URL,
+    check_account_balance,
+    get_access_token,
+    get_user_kis_credentials,
+    update_user_kis_credentials,
+)
 
 
-URL_BASE = "https://openapi.koreainvestment.com:9443"
+URL_BASE = KIS_BASE_URL
 
 
 # KIS Auth

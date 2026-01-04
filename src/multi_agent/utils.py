@@ -1,23 +1,35 @@
-import json
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-import os
-import requests
-import json
-from dotenv import load_dotenv
-import aiohttp
+from __future__ import annotations
+
 import asyncio
-from sqlalchemy import create_engine, Column, Integer, Text, TIMESTAMP, select
-from sqlalchemy.orm import declarative_base, Session
+import json
+import os
+
+import aiohttp
+import requests
+from dotenv import load_dotenv
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from sqlalchemy import Column, Integer, TIMESTAMP, Text, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 load_dotenv(override=True)
 
 Base = declarative_base()
 
+KIS_BASE_URL = os.getenv(
+    "KIS_BASE_URL", "https://openapivts.koreainvestment.com:29443"
+).rstrip("/")
+
+KIS_TR_ID_BALANCE = os.getenv("KIS_TR_ID_BALANCE", "VTTC8434R")
+KIS_TR_ID_ORDER_BUY = os.getenv("KIS_TR_ID_ORDER_BUY", "VTTC0802U")
+KIS_TR_ID_ORDER_SELL = os.getenv("KIS_TR_ID_ORDER_SELL", "VTTC0011U")
+
+
 # 사용자 테이블 모델 정의
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {"schema": os.getenv("STOCKELPER_WEB_SCHEMA", "public")}
 
     id = Column(Integer, primary_key=True)
     kis_app_key = Column(Text, nullable=False)
@@ -70,7 +82,7 @@ async def update_user_kis_credentials(async_engine: object, user_id: int, access
 
 async def get_access_token(app_key, app_secret):
     """접근 토큰(access token) 발급"""
-    url = "https://openapivts.koreainvestment.com:29443/oauth2/tokenP"
+    url = f"{KIS_BASE_URL}/oauth2/tokenP"
     headers = {
         "content-type": "application/json"
     }
@@ -94,13 +106,13 @@ async def get_access_token(app_key, app_secret):
 
 async def check_account_balance(app_key, app_secret, access_token, account_no):
     """계좌 잔고 조회"""
-    url = "https://openapivts.koreainvestment.com:29443/uapi/domestic-stock/v1/trading/inquire-balance"
+    url = f"{KIS_BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance"
     headers = {
         "Content-Type": "application/json",
         "authorization": f"Bearer {access_token}",
         "appKey": app_key,
         "appSecret": app_secret,
-        "tr_id": "VTTC8434R",  # 모의투자 계좌 잔고 조회 / 실전투자 : TTTC8434R 
+        "tr_id": KIS_TR_ID_BALANCE,  # 모의투자: VTTC8434R / 실전투자: TTTC8434R
         "custtype": "P"  # 고객타입 - P: 개인 
     }
     params = {
@@ -144,7 +156,8 @@ async def check_account_balance(app_key, app_secret, access_token, account_no):
             return None
 
 
-def get_hashkey(app_key, app_secret, body_data, url_base):
+def get_hashkey(app_key, app_secret, body_data, url_base: str | None = None):
+    url_base = (url_base or KIS_BASE_URL).rstrip("/")
     url = f"{url_base}/uapi/hashkey"
     headers = {
         'content-type': 'application/json',
@@ -174,13 +187,13 @@ def place_order(stock_code:str, order_side:str, order_type:str, order_price:floa
     - dict: 주문 결과를 포함하는 JSON 응답 데이터
     """
 
-    url = "https://openapivts.koreainvestment.com:29443/uapi/domestic-stock/v1/trading/order-cash"
+    url = f"{KIS_BASE_URL}/uapi/domestic-stock/v1/trading/order-cash"
 
     # 주문 유형에 따라 SLL_BUY_DVSN_CD와 tr_id 설정
     if order_side == "buy":
-        tr_id = "VTTC0802U"  # 매수 tr_id
+        tr_id = KIS_TR_ID_ORDER_BUY  # 모의: VTTC0802U / 실전: TTTC0802U 등
     elif order_side == "sell":
-        tr_id = "VTTC0011U"  # 매도 tr_id
+        tr_id = KIS_TR_ID_ORDER_SELL  # 모의: VTTC0011U / 실전: TTTC0011U 등
     else:
         print("주문 유형이 잘못되었습니다. 'buy' 또는 'sell'을 선택하세요.")
         return "주문 요청 실패"
@@ -205,7 +218,7 @@ def place_order(stock_code:str, order_side:str, order_type:str, order_price:floa
 
     # hashkey 생성 (주문 엔드포인트 필수)
     try:
-        hashkey = get_hashkey(kis_app_key, kis_app_secret, body, "https://openapivts.koreainvestment.com:29443")
+        hashkey = get_hashkey(kis_app_key, kis_app_secret, body, KIS_BASE_URL)
     except Exception as e:
         return f"hashkey 생성 실패: {str(e)}"
 

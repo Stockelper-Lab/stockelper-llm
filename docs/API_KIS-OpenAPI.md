@@ -9,20 +9,23 @@
   - `src/multi_agent/utils.py`: 인증, 잔고조회, 주문, hashkey 유틸
   - `src/multi_agent/technical_analysis_agent/tools/stock.py`: 시세/기술분석용 현재가 조회
   - `src/multi_agent/technical_analysis_agent/tools/chart_analysis_tool.py`: mojito SDK 경유 OHLCV 조회
-  - `src/multi_agent/portfolio_analysis_agent/tools/portfolio.py`: 각종 재무/랭킹 지표 조회
   - `src/multi_agent/investment_strategy_agent/tools/account.py`: 계정 잔고 조회(토큰 자동 갱신)
   - `src/multi_agent/supervisor_agent/agent.py`: 거래 실행(주문) 및 토큰 갱신/저장
 
 ## 2. 인증/환경 변수
-- 필요한 환경 변수(.env/.env.example 참조)
-  - `KIS_APP_KEY`, `KIS_APP_SECRET`, `KIS_ACCOUNT_NO`
-- 시스템에서의 관리
-  - 사용자별 키/계좌는 PostgreSQL `users` 테이블에 저장/조회
-  - 토큰은 필요 시 발급/갱신하여 `users.kis_access_token`에 업데이트
+- 필수 환경 변수(.env / `env.example` 참조)
+  - `DATABASE_URL`: `stockelper_web` DB 연결 문자열 (예: `postgresql://.../stockelper_web`)
+- 선택 환경 변수
+  - `ASYNC_DATABASE_URL`: SQLAlchemy async URL(미지정 시 `DATABASE_URL`에서 자동 변환)
+  - `STOCKELPER_WEB_SCHEMA`: 기본값 `public` (기본 스키마가 다를 경우 지정)
+  - `KIS_BASE_URL`: 기본값 `https://openapivts.koreainvestment.com:29443` (모의투자/VTS)
+  - `KIS_TR_ID_BALANCE`, `KIS_TR_ID_ORDER_BUY`, `KIS_TR_ID_ORDER_SELL`: 모의/실전 전환 시 tr_id override
+- 시스템에서의 사용자별 자격증명 관리
+  - 사용자별 `kis_app_key/kis_app_secret/account_no/kis_access_token` 은 PostgreSQL `users` 테이블에서 `user_id`로 조회/갱신합니다.
 
 ### 2.1 액세스 토큰 발급
 - 모듈/함수: `utils.get_access_token(app_key, app_secret)`
-- URL: `https://openapivts.koreainvestment.com:29443/oauth2/tokenP`
+- URL: `{KIS_BASE_URL}/oauth2/tokenP`
 - 메서드: `POST`
 - 헤더: `content-type: application/json`
 - 바디: `{ "grant_type": "client_credentials", "appkey": ..., "appsecret": ... }`
@@ -33,7 +36,7 @@
 
 ### 3.1 HashKey 생성 (주문 필수)
 - 모듈/함수: `utils.get_hashkey(app_key, app_secret, body, url_base)`
-- URL: `{url_base}/uapi/hashkey` (예: `https://openapivts.koreainvestment.com:29443/uapi/hashkey`)
+- URL: `{KIS_BASE_URL}/uapi/hashkey`
 - 메서드: `POST`
 - 헤더: `content-type: application/json`, `appkey`, `appsecret`
 - 바디: 실제 주문에 사용할 body(JSON)
@@ -42,13 +45,13 @@
 
 ### 3.2 현금주문 (모의투자/실전)
 - 모듈/함수: `utils.place_order(stock_code, order_side, order_type, order_price, order_quantity, account_no, kis_app_key, kis_app_secret, kis_access_token, ...)`
-- URL: `https://openapivts.koreainvestment.com:29443/uapi/domestic-stock/v1/trading/order-cash`
+- URL: `{KIS_BASE_URL}/uapi/domestic-stock/v1/trading/order-cash`
 - 메서드: `POST`
 - 헤더(통일):
   - `Content-Type: application/json`
   - `authorization: Bearer {kis_access_token}`
-  - `appkey: {KIS_APP_KEY}`
-  - `appsecret: {KIS_APP_SECRET}`
+  - `appkey: {kis_app_key}`
+  - `appsecret: {kis_app_secret}`
   - `tr_id: {VTTC0802U|VTTC0011U}` (매수/매도, 모의투자 기준)
   - `custtype: P`
   - `hashkey: {get_hashkey(...)로 생성}`
@@ -70,7 +73,7 @@
 
 ### 3.3 계좌 잔고 조회
 - 모듈/함수: `utils.check_account_balance(app_key, app_secret, access_token, account_no)`
-- URL: `https://openapivts.koreainvestment.com:29443/uapi/domestic-stock/v1/trading/inquire-balance`
+- URL: `{KIS_BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance`
 - 메서드: `GET`
 - 헤더: `Content-Type`, `authorization: Bearer ...`, `appKey`, `appSecret`, `tr_id: VTTC8434R`, `custtype: P`
 - 파라미터: `CANO`, `ACNT_PRDT_CD` 등
@@ -83,7 +86,7 @@
 
 ### 4.1 현재가 조회(시세)
 - 모듈/함수: `technical_analysis_agent/tools/stock.py` → `AnalysisStockTool.get_current_price(stock_no, user_id)`
-- URL: `https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-price`
+- URL: `{KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-price`
 - 메서드: `GET`
 - 헤더: `authorization: Bearer ...`, `appkey`, `appsecret`, `tr_id: FHKST01010100`
 - 파라미터: `fid_cond_mrkt_div_code=J`, `fid_input_iscd={stock_no}`
@@ -92,7 +95,7 @@
 - 타임아웃: `ClientTimeout(total=30)` 적용
 
 ### 4.2 종목 기본 정보 조회
-- 모듈/함수: `portfolio_analysis_agent/tools/portfolio.py` → `get_stock_basic_info(pdno, prdt_type_cd)`
+- (미구현/문서 정리 예정)
 - URL: `.../uapi/domestic-stock/v1/quotations/search-stock-info`
 - 메서드: `GET`
 - 헤더: `_make_headers("CTPF1002R", ...)`
@@ -100,7 +103,7 @@
 - 응답: 종목 기본 정보 → 포트폴리오 분석 맥락에 활용
 
 ### 4.3 재무/지표(안정성/수익성 등)
-- 모듈/함수: `portfolio_analysis_agent/tools/portfolio.py`
+- (미구현/문서 정리 예정)
   - `get_stability_ratio(symbol, div_cd="0")`
     - URL: `.../uapi/domestic-stock/v1/finance/stability-ratio`
     - 헤더: `_make_headers("FHKST66430600", ...)`
@@ -112,7 +115,7 @@
 - 에러/토큰 만료 처리: 동일 기준(401/403/500 + 두 문구)으로 재발급/재요청
 
 ### 4.4 랭킹(시가총액 상위 등)
-- 모듈/함수: `portfolio_analysis_agent/tools/portfolio.py` → `get_top_market_value(fid_rank_sort_cls_code, user_info)`
+- (미구현/문서 정리 예정)
 - URL: `.../uapi/domestic-stock/v1/ranking/market-value`
 - 헤더: `_make_headers("FHPST01790000", ...)`
 - 파라미터: 랭킹/정렬 기준 등
@@ -151,7 +154,7 @@
 ```bash
 curl -X POST \
   -H 'content-type: application/json' \
-  -d '{"grant_type":"client_credentials","appkey":"${KIS_APP_KEY}","appsecret":"${KIS_APP_SECRET}"}' \
+  -d '{"grant_type":"client_credentials","appkey":"<kis_app_key>","appsecret":"<kis_app_secret>"}' \
   https://openapivts.koreainvestment.com:29443/oauth2/tokenP
 ```
 
@@ -160,7 +163,7 @@ curl -X POST \
 ```bash
 curl -X POST \
   -H 'content-type: application/json' \
-  -H "appkey: ${KIS_APP_KEY}" -H "appsecret: ${KIS_APP_SECRET}" \
+  -H "appkey: <kis_app_key>" -H "appsecret: <kis_app_secret>" \
   -d '{"CANO":"50123456","ACNT_PRDT_CD":"01","PDNO":"005930","ORD_DVSN":"00","ORD_QTY":"10","ORD_UNPR":"70000"}' \
   https://openapivts.koreainvestment.com:29443/uapi/hashkey
 ```
@@ -169,7 +172,7 @@ curl -X POST \
 curl -X POST \
   -H 'content-type: application/json' \
   -H "authorization: Bearer ${ACCESS_TOKEN}" \
-  -H "appkey: ${KIS_APP_KEY}" -H "appsecret: ${KIS_APP_SECRET}" \
+  -H "appkey: <kis_app_key>" -H "appsecret: <kis_app_secret>" \
   -H "tr_id: VTTC0802U" -H "custtype: P" -H "hashkey: ${HASH}" \
   -d '{"CANO":"50123456","ACNT_PRDT_CD":"01","PDNO":"005930","ORD_DVSN":"00","ORD_QTY":"10","ORD_UNPR":"70000"}' \
   https://openapivts.koreainvestment.com:29443/uapi/domestic-stock/v1/trading/order-cash
@@ -180,7 +183,7 @@ curl -X POST \
 curl -G \
   -H 'content-type: application/json' \
   -H "authorization: Bearer ${ACCESS_TOKEN}" \
-  -H "appkey: ${KIS_APP_KEY}" -H "appsecret: ${KIS_APP_SECRET}" -H "tr_id: FHKST01010100" \
+  -H "appkey: <kis_app_key>" -H "appsecret: <kis_app_secret>" -H "tr_id: FHKST01010100" \
   --data-urlencode 'fid_cond_mrkt_div_code=J' \
   --data-urlencode 'fid_input_iscd=005930' \
   https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-price

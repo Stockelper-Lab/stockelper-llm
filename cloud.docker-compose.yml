@@ -18,8 +18,8 @@ services:
     env_file:
       - .env.cloud
     environment:
-      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/llm_users
-      - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/llm_users
+      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/stockelper_web
+      - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/stockelper_web
       - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
       # 컨테이너 분리: Chat API만 제공
       - STOCKELPER_SERVICE=chat

@@ -31,7 +31,7 @@
 
 #### 🔧 에이전트 초기화와 의존성 주입(DI)
 - 에이전트는 애플리케이션 import 시점이 아니라, 요청 처리 시점에 `get_multi_agent(async_database_url)`로 생성됩니다.
-- 최초 1회 생성 후 캐시되어 재사용되며, `ASYNC_DATABASE_URL`이 필수로 주입됩니다.
+- 최초 1회 생성 후 캐시되어 재사용되며, `ASYNC_DATABASE_URL` 또는 `DATABASE_URL`이 필요합니다. (`DATABASE_URL=postgresql://...`도 자동으로 asyncpg URL로 변환됩니다.)
 
 #### 📊 상태 관리
 - `messages`: 대화 히스토리
@@ -143,7 +143,7 @@ data: [DONE]
 
 요청 처리 시 내부 동작 요약
 - PostgreSQL 체크포인터로 LangGraph 상태를 저장/복구합니다.
-- 멀티에이전트는 `get_multi_agent(os.getenv("ASYNC_DATABASE_URL"))`로 획득합니다.
+- 멀티에이전트는 `get_multi_agent(to_async_sqlalchemy_url(os.getenv("ASYNC_DATABASE_URL") or os.getenv("DATABASE_URL")))`로 획득합니다.
 - 각 에이전트/도구 실행 상황은 `progress` 이벤트로 스트리밍됩니다.
 
 #### 2. 기본 상태 확인 API
@@ -214,8 +214,9 @@ OPENAI_API_KEY=sk-...                   # OpenAI GPT 모델
 OPENROUTER_API_KEY=sk-...               # Perplexity API
 
 # 데이터베이스
-ASYNC_DATABASE_URL=postgresql+asyncpg://...  # 에이전트 DI에 주입
-CHECKPOINT_DATABASE_URI=postgresql://...
+DATABASE_URL=postgresql://.../stockelper_web        # 사용자 DB (stockelper_web.users)
+ASYNC_DATABASE_URL=postgresql+asyncpg://.../stockelper_web  # (선택) 미지정 시 DATABASE_URL로부터 변환
+CHECKPOINT_DATABASE_URI=postgresql://.../checkpoint  # (선택) 미지정 시 DATABASE_URL 사용
 MONGO_URI=mongodb://...
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
@@ -224,9 +225,12 @@ NEO4J_PASSWORD=password
 # 외부 API
 OPEN_DART_API_KEY=...                   # DART 공시 시스템
 YOUTUBE_API_KEY=...                     # YouTube API
-KIS_APP_KEY=...                         # 한국투자증권 앱 키
-KIS_APP_SECRET=...                      # 한국투자증권 앱 시크릿
-KIS_ACCOUNT_NO=...                      # 모의투자 계좌번호
+# KIS_BASE_URL/TR_ID 는 (선택)이며, 사용자별 자격증명(app_key/secret/account_no/token)은
+# stockelper_web.users에서 user_id로 조회/갱신합니다.
+KIS_BASE_URL=https://openapivts.koreainvestment.com:29443
+KIS_TR_ID_BALANCE=VTTC8434R
+KIS_TR_ID_ORDER_BUY=VTTC0802U
+KIS_TR_ID_ORDER_SELL=VTTC0011U
 ```
 
 ### 운영 안정성(최근 반영)

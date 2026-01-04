@@ -10,7 +10,7 @@
 ### 1-1. 에이전트 초기화(의존성 주입, DI)
 - 애플리케이션 기동 시 환경변수 강제 접근을 피하고, 요청 처리 시점에 멀티에이전트를 구성합니다.
 - `multi_agent.get_multi_agent(async_database_url)`을 통해 최초 1회 생성/캐시하여 재사용합니다.
-- 이때 `ASYNC_DATABASE_URL`은 필수이며, 기술/전략 에이전트에 주입됩니다.
+- 이때 `ASYNC_DATABASE_URL` 또는 `DATABASE_URL`이 필요하며, 기술/전략 에이전트(DB 접근)에 주입됩니다. (`DATABASE_URL=postgresql://...` 도 자동으로 asyncpg 스킴으로 변환됩니다.)
 
 ### 2. 라우터 구조
 ```
@@ -203,7 +203,7 @@ async def health_check():
 ### `/routers/stock.py`
 - **generate_sse_response()**: SSE 응답 생성기
 - **stock_chat()**: 메인 채팅 엔드포인트
-  - 멀티에이전트는 `get_multi_agent(os.getenv("ASYNC_DATABASE_URL"))`로 지연 생성/캐시
+  - 멀티에이전트는 `get_multi_agent(to_async_sqlalchemy_url(os.getenv("ASYNC_DATABASE_URL") or os.getenv("DATABASE_URL")))`로 지연 생성/캐시
 
 ---
 

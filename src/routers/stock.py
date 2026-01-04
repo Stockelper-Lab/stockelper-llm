@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
 
+from db_urls import to_async_sqlalchemy_url, to_postgresql_conninfo
 from multi_agent import get_multi_agent
 from langchain_compat import iter_stream_tokens, message_to_text
 from .models import ChatRequest, StreamingStatus, FinalResponse
@@ -29,7 +30,11 @@ if _LANGFUSE_ENABLED:
     except Exception:
         _langfuse_handler = None
 
-CHECKPOINT_DATABASE_URI = os.getenv("CHECKPOINT_DATABASE_URI")
+CHECKPOINT_DATABASE_URI = to_postgresql_conninfo(
+    os.getenv("CHECKPOINT_DATABASE_URI")
+    or os.getenv("DATABASE_URL")
+    or os.getenv("ASYNC_DATABASE_URL")
+)
 
 router = APIRouter(prefix="/stock", tags=["stock"])
 
@@ -57,6 +62,10 @@ async def generate_simple_sse(message: str):
 async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
     """풀의 생명주기를 스트리밍과 맞춰 관리하는 SSE 응답 생성기"""
     try:
+        if not CHECKPOINT_DATABASE_URI:
+            raise RuntimeError(
+                "CHECKPOINT_DATABASE_URI 또는 DATABASE_URL/ASYNC_DATABASE_URL 이 설정되어 있지 않습니다."
+            )
         # 스트리밍 함수 내부에서 풀 생성 및 관리
         async with AsyncConnectionPool(
             conninfo=CHECKPOINT_DATABASE_URI, 
@@ -127,7 +136,12 @@ async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
 async def stock_chat(request: ChatRequest) -> StreamingResponse:
     try:
         # 멀티에이전트 인스턴스 확보 (캐시)
-        async_db_url = os.getenv("ASYNC_DATABASE_URL")
+        async_db_url = to_async_sqlalchemy_url(
+            os.getenv("ASYNC_DATABASE_URL") or os.getenv("DATABASE_URL")
+        )
+        if not async_db_url:
+            raise RuntimeError("ASYNC_DATABASE_URL 또는 DATABASE_URL 이 설정되어 있지 않습니다.")
+
         multi_agent = get_multi_agent(async_db_url)
         user_id = request.user_id
         thread_id = request.thread_id

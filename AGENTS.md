@@ -34,5 +34,5 @@
 - Before opening: run formatters/linters/tests and update docs if behavior changes.
 
 ## Security & Configuration Tips
-- Use `.env` (see `.env.example`); never commit secrets.
+- Use `.env` (see `env.example`); never commit secrets.
 - Services (Postgres/Mongo/Neo4j/Langfuse) are wired via `docker-compose.yml`; keep ports/keys in env vars.

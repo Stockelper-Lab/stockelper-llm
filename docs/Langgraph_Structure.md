@@ -26,14 +26,12 @@ graph TB
     ParallelAgents --> MA["MarketAnalysisAgent"]
     ParallelAgents --> FA["FundamentalAnalysisAgent"] 
     ParallelAgents --> TA["TechnicalAnalysisAgent"]
-    ParallelAgents --> PA["PortfolioAnalysisAgent"]
     ParallelAgents --> IA["InvestmentStrategyAgent"]
     
     %% Agent Results Back to Supervisor
     MA --> AgentResults["에이전트 결과 수집"]
     FA --> AgentResults
     TA --> AgentResults
-    PA --> AgentResults
     IA --> AgentResults
     
     AgentResults --> Supervisor
@@ -234,22 +232,19 @@ graph TB
     AsyncTasks --> Agent1Task["📊 MarketAnalysis Task"]
     AsyncTasks --> Agent2Task["📈 Fundamental Task"]
     AsyncTasks --> Agent3Task["📉 Technical Task"]
-    AsyncTasks --> Agent4Task["💼 Portfolio Task"]
-    AsyncTasks --> Agent5Task["🎯 Investment Task"]
+    AsyncTasks --> Agent4Task["🎯 Investment Task"]
     
     %% Individual Agent Streams
     Agent1Task --> Agent1Stream["📡 Agent1 스트리밍"]
     Agent2Task --> Agent2Stream["📡 Agent2 스트리밍"]
     Agent3Task --> Agent3Stream["📡 Agent3 스트리밍"]
     Agent4Task --> Agent4Stream["📡 Agent4 스트리밍"]
-    Agent5Task --> Agent5Stream["📡 Agent5 스트리밍"]
     
     %% Results Aggregation
     Agent1Stream --> ResultsAggregation["📋 결과 집계<br/>agent_results 업데이트"]
     Agent2Stream --> ResultsAggregation
     Agent3Stream --> ResultsAggregation
     Agent4Stream --> ResultsAggregation
-    Agent5Stream --> ResultsAggregation
     
     ResultsAggregation --> SupervisorReturn["🎭 Supervisor로 복귀"]
     SupervisorReturn --> NextDecision["🔄 다음 결정<br/>계속 실행 or 응답 or 거래"]

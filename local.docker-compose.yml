@@ -18,8 +18,8 @@ services:
       - ./src:/app/src  # Mount source code for development
       - ./pyproject.toml:/app/pyproject.toml  # Mount pyproject.toml for uv
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/llm_users
-      - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/llm_users
+      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/stockelper_web
+      - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/stockelper_web
       - ASYNC_DATABASE_URL_KSIC=postgresql+asyncpg://postgres:postgres@db:5432/ksic
       - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
       # 컨테이너 분리: Chat API만 제공 (/stock)
