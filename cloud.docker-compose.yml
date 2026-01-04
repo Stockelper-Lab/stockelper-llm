@@ -64,4 +64,3 @@ networks:
     external: true
   internal:
     driver: bridge
-

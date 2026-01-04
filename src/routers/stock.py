@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import re
+import traceback
 import httpx
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -66,6 +67,20 @@ async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
             raise RuntimeError(
                 "CHECKPOINT_DATABASE_URI 또는 DATABASE_URL/ASYNC_DATABASE_URL 이 설정되어 있지 않습니다."
             )
+
+        def _is_assistant_message(msg: object) -> bool:
+            if msg is None:
+                return False
+            # dict 형태(compat)
+            if isinstance(msg, dict):
+                role = (msg.get("role") or msg.get("type") or "").lower()
+                return role in {"assistant", "ai"}
+            # LangChain BaseMessage 계열
+            msg_type = getattr(msg, "type", None)
+            return msg_type == "ai"
+
+        last_emitted_text: str = ""
+
         # 스트리밍 함수 내부에서 풀 생성 및 관리
         async with AsyncConnectionPool(
             conninfo=CHECKPOINT_DATABASE_URI, 
@@ -106,27 +121,35 @@ async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
                     yield f"data: {json.dumps(streaming_response.model_dump(), ensure_ascii=False)}\n\n"
                     
                 elif response_type == "values":
-                    # 최종 메시지를 토큰 단위(delta)로 스트리밍 후 마지막에 final 전송
+                    # assistant 메시지만 토큰 단위(delta)로 스트리밍 후 마지막에 final 전송
                     last_msg = response.get("messages", [])[-1] if response.get("messages") else None
-                    message_text = message_to_text(last_msg)
-                    for token in iter_stream_tokens(message_text):
-                        yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
+                    if _is_assistant_message(last_msg):
+                        message_text = message_to_text(last_msg)
+                        if message_text and message_text != last_emitted_text:
+                            for token in iter_stream_tokens(message_text):
+                                yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
+                            last_emitted_text = message_text
 
-                    final_response = FinalResponse(
-                        type="final",
-                        message=message_text,
-                        subgraph=response.get("subgraph", {}),
-                        trading_action=response.get("trading_action")
-                    )
+                        final_response = FinalResponse(
+                            type="final",
+                            message=message_text,
+                            subgraph=response.get("subgraph", {}) or {},
+                            trading_action=response.get("trading_action"),
+                        )
             # 최종 응답과 종료 신호 전송
             yield f"data: {json.dumps(final_response.model_dump(), ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         
     except Exception as e:
+        logger.exception("Error in generate_sse_response")
+        debug = os.getenv("DEBUG_ERRORS", "false").lower() in {"1", "true", "yes"}
+        err_text = traceback.format_exc() if debug else f"{type(e).__name__}: {e}"
         # 에러 발생 시 에러 응답 전송
         error_response = FinalResponse(
             message="처리 중 오류가 발생했습니다.",
-            error=str(e)
+            error=err_text,
+            subgraph={},
+            trading_action=None,
         )
         yield f"data: {json.dumps(error_response.model_dump(), ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"

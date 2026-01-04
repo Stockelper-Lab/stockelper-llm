@@ -3,6 +3,7 @@ import json
 import asyncio
 import difflib
 import FinanceDataReader as fdr
+import logging
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from dataclasses import asdict, dataclass, field
@@ -19,6 +20,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from .prompt import SYSTEM_TEMPLATE, TRADING_SYSTEM_TEMPLATE, STOCK_NAME_USER_TEMPLATE, STOCK_CODE_USER_TEMPLATE
 from ..utils import place_order, get_user_kis_credentials, get_access_token, update_user_kis_credentials, custom_add_messages
 from langchain_compat import message_to_text
+
+logger = logging.getLogger(__name__)
 
 
 class Router(BaseModel):
@@ -322,17 +325,42 @@ class SupervisorAgent:
 
         messages = [SystemMessage(content=SYSTEM_TEMPLATE)] + state.messages[:-1] + human_message
 
-        tasks = []
-        if state.execute_agent_count == 0:
-            tasks += [self.get_stock_name_code_by_query_subgraph(state.messages[-1].content)]
-        tasks += [self.llm_with_router.ainvoke(messages)]
-
-        results = await asyncio.gather(*tasks)
         stock_info = {"subgraph": "None", "stock_name": "None", "stock_code": "None"}
-        if len(results) == 2:
-            stock_info, router_info = results
-        else:
-            router_info = results[0]
+
+        stock_task = None
+        if state.execute_agent_count == 0:
+            stock_task = asyncio.create_task(
+                self.get_stock_name_code_by_query_subgraph(state.messages[-1].content)
+            )
+
+        try:
+            router_info = await self.llm_with_router.ainvoke(messages)
+        except Exception as e:
+            # 라우팅 실패 시 챗봇이 죽지 않도록 User 응답으로 폴백
+            logger.exception("Router LLM call failed")
+            update = State(
+                messages=[
+                    AIMessage(
+                        content=(
+                            "라우팅 단계에서 오류가 발생했습니다.\n"
+                            "OPENAI_API_KEY/네트워크/모델 설정을 확인해주세요.\n\n"
+                            f"에러: {type(e).__name__}: {e}"
+                        )
+                    )
+                ],
+                agent_results=state.agent_results,
+                subgraph=state.subgraph,
+                stock_name=state.stock_name,
+                stock_code=state.stock_code,
+            )
+            return update, "__end__"
+
+        if stock_task is not None:
+            try:
+                stock_info = await stock_task
+            except Exception as e:
+                logger.exception("Stock name/code extraction failed")
+                stock_info = {"subgraph": "None", "stock_name": "None", "stock_code": "None"}
 
         subgraph = state.subgraph if stock_info["subgraph"] == "None" else stock_info["subgraph"]
         stock_name = state.stock_name if stock_info["stock_name"] == "None" else stock_info["stock_name"]
@@ -401,8 +429,13 @@ _STOCK_LISTING_CACHE = None
 def _get_stock_listing_map():
     global _STOCK_LISTING_CACHE
     if _STOCK_LISTING_CACHE is None:
-        stock_df = fdr.StockListing('KRX')
-        _STOCK_LISTING_CACHE = dict(zip(stock_df['Name'], stock_df['Code']))
+        try:
+            stock_df = fdr.StockListing("KRX")
+            _STOCK_LISTING_CACHE = dict(zip(stock_df["Name"], stock_df["Code"]))
+        except Exception:
+            # 네트워크/데이터 소스 장애 시에도 서버가 죽지 않도록 빈 맵으로 폴백
+            logger.exception("Failed to load KRX stock listing (FinanceDataReader)")
+            _STOCK_LISTING_CACHE = {}
     return _STOCK_LISTING_CACHE
 
 
