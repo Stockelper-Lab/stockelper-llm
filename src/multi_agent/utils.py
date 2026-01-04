@@ -25,6 +25,17 @@ KIS_TR_ID_BALANCE = os.getenv("KIS_TR_ID_BALANCE", "VTTC8434R")
 KIS_TR_ID_ORDER_BUY = os.getenv("KIS_TR_ID_ORDER_BUY", "VTTC0802U")
 KIS_TR_ID_ORDER_SELL = os.getenv("KIS_TR_ID_ORDER_SELL", "VTTC0011U")
 
+_KIS_TOKEN_EXPIRED_SUBSTRINGS = (
+    "기간이 만료된 token",
+    "유효하지 않은 token",
+)
+
+
+def is_kis_token_expired_message(message: str | None) -> bool:
+    if not message:
+        return False
+    return any(s in message for s in _KIS_TOKEN_EXPIRED_SUBSTRINGS)
+
 
 # 사용자 테이블 모델 정의
 class User(Base):
@@ -78,6 +89,59 @@ async def update_user_kis_credentials(async_engine: object, user_id: int, access
         user.kis_access_token = access_token
         await session.commit()
         return True
+
+
+async def get_user_kis_context(
+    async_engine: object, user_id: int, *, require: bool = True
+) -> dict | None:
+    """users 테이블에서 KIS 자격증명/계좌/토큰을 로드하고, 토큰이 없으면 발급 후 DB에 저장합니다.
+
+    stockelper-portfolio의 LoadUserContext 패턴을 stockelper-llm 전역에서 재사용하기 위한 유틸입니다.
+    """
+    user_info = await get_user_kis_credentials(async_engine, user_id)
+    if not user_info:
+        if require:
+            raise ValueError(f"user_id={user_id} 사용자를 DB에서 찾지 못했습니다.")
+        return None
+
+    if not user_info.get("account_no"):
+        if require:
+            raise ValueError("users.account_no가 비어있습니다.")
+        return None
+
+    access_token = user_info.get("kis_access_token")
+    if not access_token:
+        access_token = await get_access_token(
+            user_info["kis_app_key"], user_info["kis_app_secret"]
+        )
+        if not access_token:
+            if require:
+                raise ValueError("KIS access token 발급 실패 (app_key/app_secret 확인 필요)")
+            return None
+
+        await update_user_kis_credentials(async_engine, user_id, access_token)
+        user_info["kis_access_token"] = access_token
+
+    return user_info
+
+
+async def refresh_user_kis_access_token(
+    async_engine: object, user_id: int, user_info: dict | None = None
+) -> str:
+    """토큰 만료 시 새 토큰을 발급하고 DB(users.kis_access_token)를 업데이트합니다."""
+    if user_info is None:
+        user_info = await get_user_kis_credentials(async_engine, user_id)
+    if not user_info:
+        raise ValueError(f"user_id={user_id} 사용자를 DB에서 찾지 못했습니다.")
+
+    access_token = await get_access_token(
+        user_info["kis_app_key"], user_info["kis_app_secret"]
+    )
+    if not access_token:
+        raise ValueError("KIS access token 재발급 실패")
+
+    await update_user_kis_credentials(async_engine, user_id, access_token)
+    return access_token
 
 
 async def get_access_token(app_key, app_secret):
@@ -141,8 +205,10 @@ async def check_account_balance(app_key, app_secret, access_token, account_no):
                         total_eval = output.get('tot_evlu_amt')  # 총 평가금액
                         return {'cash': cash, 'total_eval': total_eval}
                     else:
-                        print(f"잔고 조회 실패: {res_data.get('msg1')}")
-                        return None
+                        msg1 = res_data.get("msg1") if isinstance(res_data, dict) else None
+                        print(f"잔고 조회 실패: {msg1}")
+                        # 토큰 만료 판단 등을 위해 msg1를 그대로 반환
+                        return msg1 or None
                 else:
                     text = await res.text()
                     print(f"잔고 조회 요청 실패: {res.status} - {text}")

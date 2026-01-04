@@ -18,7 +18,13 @@ from neo4j import GraphDatabase
 import functools
 from sqlalchemy.ext.asyncio import create_async_engine
 from .prompt import SYSTEM_TEMPLATE, TRADING_SYSTEM_TEMPLATE, STOCK_NAME_USER_TEMPLATE, STOCK_CODE_USER_TEMPLATE
-from ..utils import place_order, get_user_kis_credentials, get_access_token, update_user_kis_credentials, custom_add_messages
+from ..utils import (
+    custom_add_messages,
+    get_user_kis_context,
+    is_kis_token_expired_message,
+    place_order,
+    refresh_user_kis_access_token,
+)
 from langchain_compat import message_to_text
 from json_safety import to_jsonable
 
@@ -180,25 +186,18 @@ class SupervisorAgent:
         
         if human_check:
             user_id = config["configurable"]["user_id"]
-            user_info = await get_user_kis_credentials(self.async_engine, user_id)
-            update_access_token_flag = False
+            user_info = await get_user_kis_context(self.async_engine, user_id, require=False)
             if user_info:
-                if user_info['kis_access_token'] is None:
-                    user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
-                    update_access_token_flag = True
-
                 kwargs = state.trading_action | user_info
-
                 trading_result = place_order(**kwargs)
-                if isinstance(trading_result, str) and ("기간이 만료된 token" in trading_result or "유효하지 않은 token" in trading_result):
-                    kwargs['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
-                    update_access_token_flag = True
-                    # 최신 토큰을 user_info에도 반영
-                    user_info['kis_access_token'] = kwargs['kis_access_token']
-                    trading_result = place_order(**kwargs)
 
-                if update_access_token_flag:
-                    await update_user_kis_credentials(self.async_engine, user_id, user_info['kis_access_token'])
+                # 토큰 만료면 재발급 → DB 업데이트 → 1회 재시도
+                if isinstance(trading_result, str) and is_kis_token_expired_message(trading_result):
+                    user_info["kis_access_token"] = await refresh_user_kis_access_token(
+                        self.async_engine, user_id, user_info
+                    )
+                    kwargs["kis_access_token"] = user_info["kis_access_token"]
+                    trading_result = place_order(**kwargs)
             else:
                 trading_result = "계좌정보가 없습니다."
 

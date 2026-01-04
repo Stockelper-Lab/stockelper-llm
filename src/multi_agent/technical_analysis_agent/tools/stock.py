@@ -19,10 +19,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from multi_agent.utils import (
     KIS_BASE_URL,
-    check_account_balance,
-    get_access_token,
-    get_user_kis_credentials,
-    update_user_kis_credentials,
+    get_user_kis_context,
+    is_kis_token_expired_message,
+    refresh_user_kis_access_token,
 )
 
 
@@ -54,15 +53,9 @@ class AnalysisStockTool(BaseTool):
     # 주식현재가 시세
     async def get_current_price(self, stock_no, user_id):
         try:
-            user_info = await get_user_kis_credentials(self.async_engine, user_id)
-            update_access_token_flag = False
+            user_info = await get_user_kis_context(self.async_engine, user_id, require=False)
             if not user_info:
                 return "There is no account information available."
-            
-            if not user_info['kis_access_token']:
-                access_token = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
-                user_info['kis_access_token'] = access_token
-                update_access_token_flag = True
 
             headers = {
                 "content-type": "application/json",
@@ -86,24 +79,30 @@ class AnalysisStockTool(BaseTool):
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(URL, headers=headers, params=params) as res:
                     status_code = res.status
-                    res_body = await res.json()
+                    try:
+                        res_body = await res.json()
+                    except Exception:
+                        text = await res.text()
+                        res_body = {"msg1": text}
 
-                    msg = res_body.get('msg1', '') if isinstance(res_body, dict) else str(res_body)
-                    if status_code in (401, 403, 500) and ("유효하지 않은 token" in msg or "기간이 만료된 token" in msg):
-                        user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
-                        update_access_token_flag = True
-
-                        headers["authorization"] = (
-                            f"Bearer {user_info['kis_access_token']}"
+                    msg = (
+                        res_body.get("msg1", "") if isinstance(res_body, dict) else str(res_body)
+                    )
+                    # 일부 엔드포인트는 200으로 내려오더라도 msg1에 토큰 만료가 담길 수 있어
+                    # 상태코드와 무관하게 메시지 기반으로 만료를 감지합니다(1회 재시도).
+                    if is_kis_token_expired_message(msg):
+                        # 토큰 재발급 → DB 업데이트 → 1회 재시도
+                        user_info["kis_access_token"] = await refresh_user_kis_access_token(
+                            self.async_engine, user_id, user_info
                         )
-                        async with session.get(
-                            URL, headers=headers, params=params
-                        ) as res_refresh:
+                        headers["authorization"] = f"Bearer {user_info['kis_access_token']}"
+                        async with session.get(URL, headers=headers, params=params) as res_refresh:
                             status_code = res_refresh.status
-                            res_body = await res_refresh.json()
-
-                    if update_access_token_flag:
-                        await update_user_kis_credentials(self.async_engine, user_id, user_info['kis_access_token'])
+                            try:
+                                res_body = await res_refresh.json()
+                            except Exception:
+                                text = await res_refresh.text()
+                                res_body = {"msg1": text}
 
                     if status_code != 200:
                         return None

@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from multi_agent.utils import (
     check_account_balance,
-    get_access_token,
-    get_user_kis_credentials,
-    update_user_kis_credentials,
+    get_user_kis_context,
+    is_kis_token_expired_message,
+    refresh_user_kis_access_token,
 )
 
 
@@ -33,26 +33,30 @@ class GetAccountInfoTool(BaseTool):
         return asyncio.run(self._arun(config, run_manager))
     
     async def _arun(self, config: RunnableConfig, run_manager: Optional[AsyncCallbackManagerForToolRun] = None):
-        user_info = await get_user_kis_credentials(self.async_engine, config["configurable"]["user_id"])
-        update_access_token_flag = False
+        user_id = config["configurable"]["user_id"]
+        user_info = await get_user_kis_context(self.async_engine, user_id, require=False)
         if not user_info:
             return "There is no account information available."
-        
-        if not user_info['kis_access_token']:
-            access_token = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
-            user_info['kis_access_token'] = access_token
-            update_access_token_flag = True
-        
-        account_info = await check_account_balance(user_info['kis_app_key'], user_info['kis_app_secret'], user_info['kis_access_token'], user_info['account_no'])
+
+        account_info = await check_account_balance(
+            user_info["kis_app_key"],
+            user_info["kis_app_secret"],
+            user_info["kis_access_token"],
+            user_info["account_no"],
+        )
+
+        # 토큰 만료면 재발급 → DB 업데이트 → 1회 재시도
+        if isinstance(account_info, str) and is_kis_token_expired_message(account_info):
+            new_token = await refresh_user_kis_access_token(self.async_engine, user_id, user_info)
+            user_info["kis_access_token"] = new_token
+            account_info = await check_account_balance(
+                user_info["kis_app_key"],
+                user_info["kis_app_secret"],
+                user_info["kis_access_token"],
+                user_info["account_no"],
+            )
+
         if account_info is None:
             return "There is no account information available."
-        
-        if isinstance(account_info, str) and ("유효하지 않은 token" in account_info or "기간이 만료된 token" in account_info):
-            user_info['kis_access_token'] = await get_access_token(user_info['kis_app_key'], user_info['kis_app_secret'])
-            account_info = await check_account_balance(user_info['kis_app_key'], user_info['kis_app_secret'], user_info['kis_access_token'], user_info['account_no'])
-            update_access_token_flag = True
-            
-        if update_access_token_flag:
-            await update_user_kis_credentials(self.async_engine, config["configurable"]["user_id"], user_info['kis_access_token'])
-        
+
         return account_info
