@@ -89,8 +89,28 @@ def tokenize_korean(text: str) -> list[str]:
 
 
 def iter_stream_tokens(text: str) -> Iterable[str]:
+    """Yield user-friendly streaming chunks while preserving whitespace.
+
+    We intentionally attach trailing whitespace (spaces/newlines) to the previous chunk so that
+    clients that ignore whitespace-only deltas still render correct spacing.
+    """
+    if not text:
+        return
+
+    buf = ""
     for token in tokenize_korean(text):
-        if token.strip():
-            yield token
+        if not buf:
+            buf = token
+            continue
+
+        if token.isspace():
+            buf += token
+            continue
+
+        yield buf
+        buf = token
+
+    if buf:
+        yield buf
 
 
