@@ -42,12 +42,32 @@ CHECKPOINT_DATABASE_URI = to_postgresql_conninfo(
 router = APIRouter(prefix="/stock", tags=["stock"])
 
 _BACKTEST_PAT = re.compile(r"(백테스트|백테스팅|backtest|backtesting)", re.IGNORECASE)
+_PORTFOLIO_COUNT_PAT = re.compile(r"(\d{1,3})\s*(?:개|종목)")
+
+
+def _extract_portfolio_size(text: str) -> int | None:
+    """채팅 문장에서 '10개', '10개 종목', '10 종목' 같은 추천 개수를 추출합니다."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    m = _PORTFOLIO_COUNT_PAT.search(t)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
 
 
 def _is_portfolio_recommendation_request(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return False
+
+    # 케이스: "10개 종목 추천해줘" 같이 포트폴리오 단어 없이도 '여러 종목' 추천을 요청
+    # - 숫자(개수)가 있고, 종목 추천 문맥이면 포트폴리오 추천으로 간주
+    if "추천" in t and "종목" in t and _extract_portfolio_size(t) is not None:
+        return True
 
     # 케이스: "포트폴리오 추천해줘", "포트폴리오 구성", "리밸런싱", "자산 배분" 등
     if "리밸런" in t:
@@ -72,7 +92,9 @@ async def generate_simple_sse(message: str):
     yield "data: [DONE]\n\n"
 
 
-async def _trigger_portfolio_recommendations(user_id: int) -> None:
+async def _trigger_portfolio_recommendations(
+    user_id: int, portfolio_size: int | None = None
+) -> None:
     """포트폴리오 추천 API를 호출해 추천 서버 실행 및 DB 적재를 트리거합니다.
 
     NOTE: 채팅창에는 결과를 보여주지 않습니다(페이지에서 확인 유도).
@@ -85,9 +107,12 @@ async def _trigger_portfolio_recommendations(user_id: int) -> None:
     timeout_s = float(os.getenv("PORTFOLIO_REQUESTS_TIMEOUT", "") or os.getenv("REQUESTS_TIMEOUT", "300") or 300)
     try:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
+            payload = {"user_id": user_id}
+            if portfolio_size is not None:
+                payload["portfolio_size"] = portfolio_size
             resp = await client.post(
                 f"{base}/portfolio/recommendations",
-                json={"user_id": user_id},
+                json=payload,
             )
             # portfolio 서버는 내부에서 DB 적재를 수행할 예정이므로, 여기선 성공/실패만 로깅합니다.
             if resp.status_code >= 400:
@@ -97,9 +122,17 @@ async def _trigger_portfolio_recommendations(user_id: int) -> None:
                     detail = resp.text
                 raise RuntimeError(f"portfolio API error ({resp.status_code}): {detail}")
 
-        logger.info("Triggered portfolio recommendations: user_id=%s", user_id)
+        logger.info(
+            "Triggered portfolio recommendations: user_id=%s, portfolio_size=%s",
+            user_id,
+            portfolio_size,
+        )
     except Exception:
-        logger.exception("Failed to trigger portfolio recommendations: user_id=%s", user_id)
+        logger.exception(
+            "Failed to trigger portfolio recommendations: user_id=%s, portfolio_size=%s",
+            user_id,
+            portfolio_size,
+        )
 
 
 async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
@@ -227,11 +260,33 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
                         "관리자에게 문의해주세요."
                     )
                 else:
+                    portfolio_size = _extract_portfolio_size(query)
+                    if portfolio_size is not None and not (1 <= portfolio_size <= 20):
+                        msg = (
+                            "포트폴리오 추천 종목 개수는 현재 1~20개까지만 지원합니다.\n"
+                            f"(요청하신 값: {portfolio_size}개)\n"
+                            "예) '10개 종목을 추천해줘'"
+                        )
+                        return StreamingResponse(
+                            generate_simple_sse(msg),
+                            media_type="text/event-stream; charset=utf-8",
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "Connection": "keep-alive",
+                                "Content-Type": "text/event-stream; charset=utf-8",
+                                "X-Accel-Buffering": "no",
+                            },
+                        )
+
                     # 추천 서버를 백그라운드로 트리거하고(출력은 추천 서버가 DB에 저장),
                     # 챗봇은 안내만 합니다.
-                    asyncio.create_task(_trigger_portfolio_recommendations(user_id))
-                    guide = (
-                        "포트폴리오 추천을 생성 중입니다.\n"
+                    asyncio.create_task(
+                        _trigger_portfolio_recommendations(user_id, portfolio_size=portfolio_size)
+                    )
+                    guide = "포트폴리오 추천을 생성 중입니다.\n"
+                    if portfolio_size is not None:
+                        guide += f"(요청 개수: {portfolio_size}개)\n"
+                    guide += (
                         "포트폴리오 추천 페이지로 이동해서 결과를 확인해주세요.\n"
                         "(생성에는 몇 분 정도 걸릴 수 있습니다.)"
                     )
