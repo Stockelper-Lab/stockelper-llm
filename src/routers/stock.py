@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 import logging
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 _LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "true").lower() not in {"0", "false", "no"}
 _BACKTESTING_SERVICE_URL = os.getenv("STOCKELPER_BACKTESTING_URL", "").strip()
+_PORTFOLIO_SERVICE_URL = os.getenv("STOCKELPER_PORTFOLIO_URL", "").strip()
 
 # LangChain v1에서 langfuse.langchain 통합이 깨질 수 있어(legacy import 의존),
 # Langfuse는 옵션으로만 활성화한다.
@@ -39,12 +41,22 @@ CHECKPOINT_DATABASE_URI = to_postgresql_conninfo(
 
 router = APIRouter(prefix="/stock", tags=["stock"])
 
-_PORTFOLIO_BLOCK_PAT = re.compile(r"(포트폴리오\s*추천|자산\s*배분|리밸런싱)", re.IGNORECASE)
 _BACKTEST_PAT = re.compile(r"(백테스트|백테스팅|backtest|backtesting)", re.IGNORECASE)
 
 
 def _is_portfolio_recommendation_request(text: str) -> bool:
-    return bool(_PORTFOLIO_BLOCK_PAT.search(text or ""))
+    t = (text or "").strip()
+    if not t:
+        return False
+
+    # 케이스: "포트폴리오 추천해줘", "포트폴리오 구성", "리밸런싱", "자산 배분" 등
+    if "리밸런" in t:
+        return True
+    if "자산" in t and ("배분" in t or "분배" in t):
+        return True
+    if "포트폴리오" in t and any(k in t for k in ("추천", "구성", "배분", "분배", "리밸런")):
+        return True
+    return False
 
 
 def _is_backtest_request(text: str) -> bool:
@@ -58,6 +70,36 @@ async def generate_simple_sse(message: str):
         yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
     yield f"data: {json.dumps(final_response.model_dump(), ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"
+
+
+async def _trigger_portfolio_recommendations(user_id: int) -> None:
+    """포트폴리오 추천 API를 호출해 추천 서버 실행 및 DB 적재를 트리거합니다.
+
+    NOTE: 채팅창에는 결과를 보여주지 않습니다(페이지에서 확인 유도).
+    """
+    base = _PORTFOLIO_SERVICE_URL.rstrip("/")
+    if not base:
+        logger.warning("STOCKELPER_PORTFOLIO_URL is not set; skip portfolio trigger")
+        return
+
+    timeout_s = float(os.getenv("PORTFOLIO_REQUESTS_TIMEOUT", "") or os.getenv("REQUESTS_TIMEOUT", "300") or 300)
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(
+                f"{base}/portfolio/recommendations",
+                json={"user_id": user_id},
+            )
+            # portfolio 서버는 내부에서 DB 적재를 수행할 예정이므로, 여기선 성공/실패만 로깅합니다.
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json().get("detail")
+                except Exception:
+                    detail = resp.text
+                raise RuntimeError(f"portfolio API error ({resp.status_code}): {detail}")
+
+        logger.info("Triggered portfolio recommendations: user_id=%s", user_id)
+    except Exception:
+        logger.exception("Failed to trigger portfolio recommendations: user_id=%s", user_id)
 
 
 async def generate_sse_response(multi_agent, input_state, user_id, thread_id):
@@ -175,12 +217,24 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
 
         # 입력 상태 구성
         if human_feedback is None:
-            # 요구사항: 포트폴리오 추천은 챗봇에서 실행하지 않음(전용 페이지로 유도)
+            # 포트폴리오 추천: 백엔드에서는 추천 API를 호출(=추천 서버 실행/DB 적재),
+            # 채팅창에서는 전용 페이지로 이동 안내만 반환
             if _is_portfolio_recommendation_request(query):
-                guide = (
-                    "포트폴리오 추천 기능은 챗봇에서 실행하지 않습니다.\n"
-                    "포트폴리오 추천 페이지에서 버튼을 눌러 실행해주세요."
-                )
+                if not _PORTFOLIO_SERVICE_URL:
+                    guide = (
+                        "포트폴리오 추천 기능은 포트폴리오 추천 페이지에서 확인할 수 있습니다.\n"
+                        "현재 포트폴리오 추천 서버(STOCKELPER_PORTFOLIO_URL)가 설정되어 있지 않습니다.\n"
+                        "관리자에게 문의해주세요."
+                    )
+                else:
+                    # 추천 서버를 백그라운드로 트리거하고(출력은 추천 서버가 DB에 저장),
+                    # 챗봇은 안내만 합니다.
+                    asyncio.create_task(_trigger_portfolio_recommendations(user_id))
+                    guide = (
+                        "포트폴리오 추천을 생성 중입니다.\n"
+                        "포트폴리오 추천 페이지로 이동해서 결과를 확인해주세요.\n"
+                        "(생성에는 몇 분 정도 걸릴 수 있습니다.)"
+                    )
                 return StreamingResponse(
                     generate_simple_sse(guide),
                     media_type="text/event-stream; charset=utf-8",

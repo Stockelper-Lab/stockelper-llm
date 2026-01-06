@@ -131,6 +131,7 @@ LANGFUSE_HOST=http://localhost:21003
 # 서비스 설정
 STOCKELPER_SERVICE=chat           # "chat" 또는 "all"
 STOCKELPER_BACKTESTING_URL=       # 백테스팅 서비스 URL (선택)
+STOCKELPER_PORTFOLIO_URL=         # 포트폴리오 추천 서비스 URL (예: http://portfolio-server:21008)
 ```
 
 ## 🐳 Docker 실행
