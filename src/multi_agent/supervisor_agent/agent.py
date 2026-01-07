@@ -2,7 +2,6 @@ import os
 import json
 import asyncio
 import difflib
-import FinanceDataReader as fdr
 import logging
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -455,123 +454,111 @@ def _debug_errors_enabled() -> bool:
     return os.getenv("DEBUG_ERRORS", "false").lower() not in {"0", "false", "no"}
 
 
-def _log_stock_listing_load_error(source: str, err: Exception) -> None:
-    # 운영 환경에서는 로그 스팸/스택트레이스를 피하고, 디버그 모드에서만 상세 traceback을 출력합니다.
-    if _debug_errors_enabled():
-        logger.exception("Failed to load KRX stock listing (%s)", source)
-    else:
-        logger.warning(
-            "Failed to load KRX stock listing (%s): %s: %s",
-            source,
-            type(err).__name__,
-            err,
-        )
+def _parse_kis_mst_text(text: str) -> dict:
+    """KIS 종목마스터(.mst) 텍스트를 파싱해 종목명→종목코드 맵으로 변환합니다.
 
-
-def _load_stock_listing_from_kind() -> dict:
-    """KRX KIND 상장법인목록(다운로드)에서 종목명→종목코드 맵을 로드합니다.
-
-    FinanceDataReader의 KRX listing이 네트워크/응답 포맷 변화로 깨지는 경우가 있어,
-    HTML 테이블 기반의 안정적인 폴백 소스로 사용합니다.
+    KIS 샘플코드(kis_kospi_code_mst.py) 기준:
+    - row 마지막 228 byte(문자) = part2 고정폭 정보
+    - row 앞부분 = part1(단축코드 9, 표준코드 12, 한글명 가변)
     """
-    import pandas as pd
+    mapping: dict[str, str] = {}
+    if not text:
+        return mapping
+
+    for raw in text.splitlines():
+        row = (raw or "").rstrip("\r\n")
+        if not row:
+            continue
+        # 최소 길이 방어(단축코드/표준코드/한글명 + part2)
+        if len(row) < (21 + 1 + 228):
+            continue
+
+        part1 = row[:-228]
+        if len(part1) < 21:
+            continue
+
+        code_raw = part1[0:9].strip()
+        name = part1[21:].strip()
+        if not code_raw or not name:
+            continue
+
+        # 단축코드는 6자리 숫자지만 파일상 9자리 영역이므로 숫자만 추출 후 6자리로 정규화
+        code_digits = "".join(ch for ch in code_raw if ch.isdigit())
+        if not code_digits:
+            continue
+        code_digits = code_digits.zfill(6)
+        if not (len(code_digits) == 6 and code_digits.isdigit()):
+            continue
+
+        # 동일 이름이 여러 시장에 존재하면 최초 값을 유지
+        mapping.setdefault(name, code_digits)
+
+    return mapping
+
+
+def _load_stock_listing_from_kis_master() -> dict:
+    """KIS 개발자센터 '종목정보파일'에서 제공하는 mst.zip으로 종목명→종목코드 맵을 로드합니다."""
+    import io
+    import zipfile
     import requests
 
-    url = os.getenv(
-        "KRX_KIND_CORPLIST_URL",
-        "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13",
-    ).strip()
-    if not url:
-        raise ValueError("KRX_KIND_CORPLIST_URL is empty")
+    # 기본: 코스피/코스닥(+코넥스) 종목마스터 파일
+    default_urls = [
+        "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip",
+        "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip",
+        "https://new.real.download.dws.co.kr/common/master/konex_code.mst.zip",
+    ]
+    raw_urls = (os.getenv("KIS_STOCK_MASTER_URLS") or "").strip()
+    urls = [u.strip() for u in raw_urls.split(",") if u.strip()] if raw_urls else default_urls
 
     headers = {
         "User-Agent": os.getenv(
             "STOCK_LISTING_USER_AGENT",
-            # 최소 User-Agent (일부 환경에서 빈 UA면 차단/빈 응답)
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         )
     }
-    resp = requests.get(url, headers=headers, timeout=15)
-    resp.raise_for_status()
+    timeout_s = float(os.getenv("KIS_STOCK_MASTER_TIMEOUT", "30") or 30)
 
-    dfs = pd.read_html(resp.text)
-    if not dfs:
-        raise ValueError("KRX KIND 응답에서 테이블을 찾지 못했습니다.")
+    mapping: dict[str, str] = {}
+    for url in urls:
+        try:
+            resp = requests.get(url, headers=headers, timeout=timeout_s)
+            resp.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+                mst_name = next((n for n in zf.namelist() if n.lower().endswith(".mst")), None)
+                if not mst_name:
+                    raise ValueError("zip 내부에 .mst 파일이 없습니다.")
+                mst_bytes = zf.read(mst_name)
 
-    df = dfs[0]
-    df.columns = [str(c).strip() for c in df.columns]
+            text = mst_bytes.decode("cp949", errors="replace")
+            part = _parse_kis_mst_text(text)
+            if part:
+                for k, v in part.items():
+                    mapping.setdefault(k, v)
+            logger.info("Loaded KIS stock master: url=%s rows=%d", url, len(part))
+        except Exception as e:
+            # 운영에서는 traceback을 숨기고 경고만 남깁니다.
+            if _debug_errors_enabled():
+                logger.exception("Failed to load KIS stock master: url=%s", url)
+            else:
+                logger.warning(
+                    "Failed to load KIS stock master: url=%s err=%s: %s",
+                    url,
+                    type(e).__name__,
+                    e,
+                )
 
-    # 일반적으로: 회사명 / 종목코드 컬럼이 존재
-    name_col = None
-    code_col = None
-    for c in df.columns:
-        if c in {"회사명", "종목명", "Name"}:
-            name_col = c
-            break
-    for c in df.columns:
-        if c in {"종목코드", "Code"}:
-            code_col = c
-            break
-
-    if not name_col or not code_col:
-        raise ValueError(f"예상치 못한 컬럼 구성입니다: {df.columns.tolist()}")
-
-    names = df[name_col].astype(str).str.strip()
-    codes = (
-        df[code_col]
-        .astype(str)
-        .str.strip()
-        # pandas가 숫자를 float로 읽는 경우(예: 5930.0) 대비
-        .str.replace(r"\.0$", "", regex=True)
-        .str.zfill(6)
-    )
-
-    listing = dict(zip(names, codes))
-    # 안전 필터링
-    listing = {
-        k: v
-        for k, v in listing.items()
-        if k and v and v.isdigit() and len(v) == 6
-    }
-    if not listing:
-        raise ValueError("KRX KIND에서 로드한 상장목록이 비어있습니다.")
-
-    return listing
+    return mapping
 
 
 def _get_stock_listing_map():
     global _STOCK_LISTING_CACHE
     if _STOCK_LISTING_CACHE is None:
-        # 1) FinanceDataReader 우선 시도
-        try:
-            stock_df = fdr.StockListing("KRX")
-            stock_df["Name"] = stock_df["Name"].astype(str).str.strip()
-            stock_df["Code"] = stock_df["Code"].astype(str).str.strip().str.zfill(6)
-            _STOCK_LISTING_CACHE = dict(zip(stock_df["Name"], stock_df["Code"]))
-            _STOCK_LISTING_CACHE = {
-                k: v
-                for k, v in _STOCK_LISTING_CACHE.items()
-                if k and v and v.isdigit() and len(v) == 6
-            }
-            if _STOCK_LISTING_CACHE:
-                logger.info(
-                    "Loaded KRX stock listing via FinanceDataReader: %d",
-                    len(_STOCK_LISTING_CACHE),
-                )
-                return _STOCK_LISTING_CACHE
-        except Exception as e:
-            _log_stock_listing_load_error("FinanceDataReader", e)
-
-        # 2) KRX KIND 폴백
-        try:
-            _STOCK_LISTING_CACHE = _load_stock_listing_from_kind()
-            logger.info(
-                "Loaded KRX stock listing via KRX KIND: %d", len(_STOCK_LISTING_CACHE)
-            )
-        except Exception as e:
-            _log_stock_listing_load_error("KRX KIND", e)
-            # 네트워크/데이터 소스 장애 시에도 서버가 죽지 않도록 빈 맵으로 폴백
-            _STOCK_LISTING_CACHE = {}
+        _STOCK_LISTING_CACHE = _load_stock_listing_from_kis_master()
+        if _STOCK_LISTING_CACHE:
+            logger.info("Loaded stock listing via KIS master: %d", len(_STOCK_LISTING_CACHE))
+        else:
+            logger.warning("Stock listing map is empty (KIS master load failed).")
     return _STOCK_LISTING_CACHE
 
 
