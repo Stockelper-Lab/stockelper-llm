@@ -225,9 +225,34 @@ class SupervisorAgent:
         stock_name = response.stock_name
         if stock_name != "None":
             stock_codes = find_similar_companies(company_name=stock_name, top_n=10)
-            messages = [HumanMessage(content=STOCK_CODE_USER_TEMPLATE.format(stock_name=stock_name, stock_codes=stock_codes))]
-            response = await self.llm_with_stock_code.ainvoke(messages)
-            stock_code = response.stock_code
+            if stock_codes:
+                messages = [
+                    HumanMessage(
+                        content=STOCK_CODE_USER_TEMPLATE.format(
+                            stock_name=stock_name, stock_codes=stock_codes
+                        )
+                    )
+                ]
+                response = await self.llm_with_stock_code.ainvoke(messages)
+                stock_code = response.stock_code
+            else:
+                # 최후 폴백: 상장목록 소스가 모두 실패한 경우라도,
+                # LLM이 유명 종목(예: 삼성전자=005930)을 알고 있으면 동작하도록 유도합니다.
+                fallback_prompt = (
+                    "Please return the 6-digit KRX stock code for the given Stock Name. "
+                    "If unknown, return \"None\".\n\n"
+                    "<Stock_Name>\n"
+                    f"{stock_name}\n"
+                    "</Stock_Name>\n"
+                )
+                response = await self.llm_with_stock_code.ainvoke(
+                    [HumanMessage(content=fallback_prompt)]
+                )
+                stock_code = response.stock_code
+
+            # 방어: 6자리 숫자 형식이 아니면 None 처리
+            if not (isinstance(stock_code, str) and stock_code.isdigit() and len(stock_code) == 6):
+                stock_code = "None"
             try:
                 subgraph = self.get_subgraph_by_stock_name(stock_name)
             except Exception as e:
@@ -426,15 +451,126 @@ class SupervisorAgent:
 _STOCK_LISTING_CACHE = None
 
 
+def _debug_errors_enabled() -> bool:
+    return os.getenv("DEBUG_ERRORS", "false").lower() not in {"0", "false", "no"}
+
+
+def _log_stock_listing_load_error(source: str, err: Exception) -> None:
+    # 운영 환경에서는 로그 스팸/스택트레이스를 피하고, 디버그 모드에서만 상세 traceback을 출력합니다.
+    if _debug_errors_enabled():
+        logger.exception("Failed to load KRX stock listing (%s)", source)
+    else:
+        logger.warning(
+            "Failed to load KRX stock listing (%s): %s: %s",
+            source,
+            type(err).__name__,
+            err,
+        )
+
+
+def _load_stock_listing_from_kind() -> dict:
+    """KRX KIND 상장법인목록(다운로드)에서 종목명→종목코드 맵을 로드합니다.
+
+    FinanceDataReader의 KRX listing이 네트워크/응답 포맷 변화로 깨지는 경우가 있어,
+    HTML 테이블 기반의 안정적인 폴백 소스로 사용합니다.
+    """
+    import pandas as pd
+    import requests
+
+    url = os.getenv(
+        "KRX_KIND_CORPLIST_URL",
+        "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13",
+    ).strip()
+    if not url:
+        raise ValueError("KRX_KIND_CORPLIST_URL is empty")
+
+    headers = {
+        "User-Agent": os.getenv(
+            "STOCK_LISTING_USER_AGENT",
+            # 최소 User-Agent (일부 환경에서 빈 UA면 차단/빈 응답)
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        )
+    }
+    resp = requests.get(url, headers=headers, timeout=15)
+    resp.raise_for_status()
+
+    dfs = pd.read_html(resp.text)
+    if not dfs:
+        raise ValueError("KRX KIND 응답에서 테이블을 찾지 못했습니다.")
+
+    df = dfs[0]
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # 일반적으로: 회사명 / 종목코드 컬럼이 존재
+    name_col = None
+    code_col = None
+    for c in df.columns:
+        if c in {"회사명", "종목명", "Name"}:
+            name_col = c
+            break
+    for c in df.columns:
+        if c in {"종목코드", "Code"}:
+            code_col = c
+            break
+
+    if not name_col or not code_col:
+        raise ValueError(f"예상치 못한 컬럼 구성입니다: {df.columns.tolist()}")
+
+    names = df[name_col].astype(str).str.strip()
+    codes = (
+        df[code_col]
+        .astype(str)
+        .str.strip()
+        # pandas가 숫자를 float로 읽는 경우(예: 5930.0) 대비
+        .str.replace(r"\.0$", "", regex=True)
+        .str.zfill(6)
+    )
+
+    listing = dict(zip(names, codes))
+    # 안전 필터링
+    listing = {
+        k: v
+        for k, v in listing.items()
+        if k and v and v.isdigit() and len(v) == 6
+    }
+    if not listing:
+        raise ValueError("KRX KIND에서 로드한 상장목록이 비어있습니다.")
+
+    return listing
+
+
 def _get_stock_listing_map():
     global _STOCK_LISTING_CACHE
     if _STOCK_LISTING_CACHE is None:
+        # 1) FinanceDataReader 우선 시도
         try:
             stock_df = fdr.StockListing("KRX")
+            stock_df["Name"] = stock_df["Name"].astype(str).str.strip()
+            stock_df["Code"] = stock_df["Code"].astype(str).str.strip().str.zfill(6)
             _STOCK_LISTING_CACHE = dict(zip(stock_df["Name"], stock_df["Code"]))
-        except Exception:
+            _STOCK_LISTING_CACHE = {
+                k: v
+                for k, v in _STOCK_LISTING_CACHE.items()
+                if k and v and v.isdigit() and len(v) == 6
+            }
+            if _STOCK_LISTING_CACHE:
+                logger.info(
+                    "Loaded KRX stock listing via FinanceDataReader: %d",
+                    len(_STOCK_LISTING_CACHE),
+                )
+                return _STOCK_LISTING_CACHE
+        except Exception as e:
+            _log_stock_listing_load_error("FinanceDataReader", e)
+
+        # 2) KRX KIND 폴백
+        try:
+            _STOCK_LISTING_CACHE = _load_stock_listing_from_kind()
+            logger.info(
+                "Loaded KRX stock listing via KRX KIND: %d", len(_STOCK_LISTING_CACHE)
+            )
+        except Exception as e:
+            _log_stock_listing_load_error("KRX KIND", e)
             # 네트워크/데이터 소스 장애 시에도 서버가 죽지 않도록 빈 맵으로 폴백
-            logger.exception("Failed to load KRX stock listing (FinanceDataReader)")
             _STOCK_LISTING_CACHE = {}
     return _STOCK_LISTING_CACHE
 

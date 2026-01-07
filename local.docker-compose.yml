@@ -1,149 +1,66 @@
-# Local Development Docker Compose Configuration
-# Simplified version for local development with maintained port mappings
-
-version: '3.8'
-
 services:
-  # Chat API Server (LLM)
   llm-server:
+    image: stockelper-llm-server:latest
     container_name: stockelper-llm-server
-    build: .
+    build:
+      context: .
     ports:
       - "21009:21009"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
     volumes:
       - ${HOME}/.cache/huggingface/hub:/root/.cache/huggingface/hub
-      - ./src:/app/src  # Mount source code for development
-      - ./pyproject.toml:/app/pyproject.toml  # Mount pyproject.toml for uv
-    environment:
-      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/stockelper_web
-      - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/stockelper_web
-      - ASYNC_DATABASE_URL_KSIC=postgresql+asyncpg://postgres:postgres@db:5432/ksic
-      - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
-      # 컨테이너 분리: Chat API만 제공 (/stock)
-      - STOCKELPER_SERVICE=chat
-      # 분리된 Backtesting 서비스 호출(선택)
-      - STOCKELPER_BACKTESTING_URL=${STOCKELPER_BACKTESTING_URL:-http://stockelper-backtesting-server:21011}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_AUTH=myredissecret
-      - REQUESTS_TIMEOUT=300
-      # Disable Langfuse for local development (optional)
-      - LANGFUSE_ENABLED=false
-    env_file:
-      - .env
-    networks:
-      - stockelper
-    restart: unless-stopped
-
-  # PostgreSQL Database
-  db:
-    image: postgres:15
-    container_name: stockelper-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-multiple-db.sh:/docker-entrypoint-initdb.d/init-multiple-db.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - stockelper
-    restart: unless-stopped
-
-  # Redis for caching
-  redis:
-    image: redis:7-alpine
-    container_name: stockelper-redis
-    command: redis-server --requirepass myredissecret
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks:
-      - stockelper
-    restart: unless-stopped
-
-  # Optional: Langfuse for observability (can be disabled for basic local dev)
-  langfuse-db:
-    image: postgres:15
-    container_name: stockelper-langfuse-db
-    environment:
-      POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: langfuse
-      POSTGRES_DB: langfuse
-    ports:
-      - "5433:5432"
-    volumes:
-      - langfuse_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U langfuse"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - stockelper
-    restart: unless-stopped
-    profiles:
-      - langfuse
-
-  langfuse-web:
-    image: langfuse/langfuse:2
-    container_name: stockelper-langfuse-web
-    depends_on:
-      - langfuse-db
-    ports:
-      - "21003:3000"
-    environment:
-      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
-      NEXTAUTH_URL: http://localhost:21003
-      NEXTAUTH_SECRET: mysecret
-      SALT: mysalt
-      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-      LANGFUSE_INIT_ORG_ID: stockelper
-      LANGFUSE_INIT_ORG_NAME: stockelper
-      LANGFUSE_INIT_PROJECT_ID: stockelper
-      LANGFUSE_INIT_PROJECT_NAME: stockelper
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: "abcde"
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: "abcde"
-      LANGFUSE_INIT_USER_EMAIL: "stockelper@stockelper.com"
-      LANGFUSE_INIT_USER_NAME: "stockelper"
-      LANGFUSE_INIT_USER_PASSWORD: "stockelper"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/public/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:21009/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/stockelper_web
+      - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/stockelper_web
+      - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
+      # 컨테이너 분리: Chat API만 제공
+      - STOCKELPER_SERVICE=chat
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      - REQUESTS_TIMEOUT=300
+      # LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are loaded from .env.cloud
     networks:
-      - stockelper
-    restart: unless-stopped
-    profiles:
-      - langfuse
+      stockelper:
+      internal:
+
+  db:
+    image: docker.io/postgres:${POSTGRES_VERSION:-latest}
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres # CHANGEME
+      POSTGRES_DB: postgres
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-multiple-db.sh:/docker-entrypoint-initdb.d/init-multiple-db.sh:ro
+    networks:
+      stockelper:
+      internal:
 
 volumes:
   postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  langfuse_postgres_data:
     driver: local
 
 networks:
   stockelper:
     driver: bridge
     name: stockelper
+    external: true
+  internal:
+    driver: bridge
