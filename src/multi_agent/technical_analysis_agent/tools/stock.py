@@ -7,6 +7,7 @@ from langchain_core.callbacks import (
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 import os
+import logging
 import aiohttp
 import json
 import asyncio
@@ -26,6 +27,13 @@ from multi_agent.utils import (
 
 
 URL_BASE = KIS_BASE_URL
+
+logger = logging.getLogger(__name__)
+
+
+def _debug_errors_enabled() -> bool:
+    return os.getenv("DEBUG_ERRORS", "false").lower() in {"1", "true", "yes"}
+
 
 
 # KIS Auth
@@ -55,7 +63,11 @@ class AnalysisStockTool(BaseTool):
         try:
             user_info = await get_user_kis_context(self.async_engine, user_id, require=False)
             if not user_info:
-                return "There is no account information available."
+                logger.warning("KIS current price: no user KIS context (user_id=%s)", user_id)
+                return {
+                    "error": "KIS 자격증명/계좌정보가 없어 현재가를 조회할 수 없습니다.",
+                    "user_id": user_id,
+                }
 
             headers = {
                 "content-type": "application/json",
@@ -92,10 +104,16 @@ class AnalysisStockTool(BaseTool):
                     # 상태코드와 무관하게 메시지 기반으로 만료를 감지합니다(1회 재시도).
                     if is_kis_token_expired_message(msg):
                         # 토큰 재발급 → DB 업데이트 → 1회 재시도
-                        user_info["kis_access_token"] = await refresh_user_kis_access_token(
-                            self.async_engine, user_id, user_info
-                        )
-                        headers["authorization"] = f"Bearer {user_info['kis_access_token']}"
+                        try:
+                            user_info["kis_access_token"] = await refresh_user_kis_access_token(
+                                self.async_engine, user_id, user_info
+                            )
+                            headers["authorization"] = f"Bearer {user_info['kis_access_token']}"
+                        except Exception as e:
+                            logger.exception(
+                                "KIS current price: token refresh failed (user_id=%s)", user_id
+                            )
+                            return {"error": f"KIS 토큰 재발급 실패: {type(e).__name__}: {e}"}
                         async with session.get(URL, headers=headers, params=params) as res_refresh:
                             status_code = res_refresh.status
                             try:
@@ -105,16 +123,40 @@ class AnalysisStockTool(BaseTool):
                                 res_body = {"msg1": text}
 
                     if status_code != 200:
-                        return None
+                        err_msg = (
+                            res_body.get("msg1")
+                            if isinstance(res_body, dict)
+                            else str(res_body)
+                        )
+                        logger.warning(
+                            "KIS current price HTTP error: user_id=%s stock_no=%s status=%s msg=%s",
+                            user_id,
+                            stock_no,
+                            status_code,
+                            (err_msg or "")[:200],
+                        )
+                        return {"error": f"KIS 현재가 조회 실패(HTTP {status_code}): {err_msg}"}
 
                     try:
                         if res_body.get("rt_cd") != "0":
-                            return None
+                            msg1 = res_body.get("msg1", "")
+                            logger.warning(
+                                "KIS current price API error: user_id=%s stock_no=%s rt_cd=%s msg1=%s",
+                                user_id,
+                                stock_no,
+                                res_body.get("rt_cd"),
+                                (msg1 or "")[:200],
+                            )
+                            return {"error": f"KIS 현재가 조회 실패: {msg1}"}
 
                         output = res_body.get("output", {})
                         if not output:
-                            # print("No output data in response")
-                            return None
+                            logger.warning(
+                                "KIS current price: empty output (user_id=%s stock_no=%s)",
+                                user_id,
+                                stock_no,
+                            )
+                            return {"error": "KIS 현재가 응답에 output이 없습니다."}
 
                         # 필요한 정보만 추출하여 반환
                         return {
@@ -150,11 +192,28 @@ class AnalysisStockTool(BaseTool):
                             "시장 경고 코드": output.get("mrkt_warn_cls_code", ""),
                         }
                     except (KeyError, json.JSONDecodeError) as e:
-                        # print(f"Failed to parse price response: {e}\nResponse: {text}")
-                        return None
+                        logger.exception(
+                            "KIS current price parse error: user_id=%s stock_no=%s",
+                            user_id,
+                            stock_no,
+                        )
+                        return {"error": f"KIS 응답 파싱 실패: {type(e).__name__}: {e}"}
         except Exception as e:
-            # print(f"API call error: {str(e)}")
-            return None
+            if _debug_errors_enabled():
+                logger.exception(
+                    "KIS current price unexpected error: user_id=%s stock_no=%s",
+                    user_id,
+                    stock_no,
+                )
+            else:
+                logger.warning(
+                    "KIS current price unexpected error: user_id=%s stock_no=%s err=%s: %s",
+                    user_id,
+                    stock_no,
+                    type(e).__name__,
+                    e,
+                )
+            return {"error": f"KIS 현재가 조회 중 오류: {type(e).__name__}: {e}"}
 
     def _run(
         self,

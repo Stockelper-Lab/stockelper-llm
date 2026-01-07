@@ -246,7 +246,7 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
         query = request.message
         human_feedback = request.human_feedback
 
-        logger.info(f"Received query: {query}")
+        logger.info("Received query: user_id=%s thread_id=%s query=%s", user_id, thread_id, query)
 
         # 입력 상태 구성
         if human_feedback is None:

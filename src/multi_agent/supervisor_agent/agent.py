@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import difflib
+import re
 import logging
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -28,6 +29,13 @@ from langchain_compat import message_to_text
 from json_safety import to_jsonable
 
 logger = logging.getLogger(__name__)
+
+_PRICE_REQUEST_PAT = re.compile(r"(주가|가격|현재가|시세|주식\\s*가격)", re.IGNORECASE)
+
+
+def _is_price_request(text: str) -> bool:
+    return bool(_PRICE_REQUEST_PAT.search(text or ""))
+
 
 
 class Router(BaseModel):
@@ -218,43 +226,56 @@ class SupervisorAgent:
 
         return Command(update=update, goto=goto)
     
-    async def get_stock_name_code_by_query_subgraph(self, query):
+    async def get_stock_name_code_by_query_subgraph(self, query, *, include_subgraph: bool = True):
         messages = [HumanMessage(content=STOCK_NAME_USER_TEMPLATE.format(user_request=query))]
         response = await self.llm_with_stock_name.ainvoke(messages)
         stock_name = response.stock_name
         if stock_name != "None":
-            stock_codes = find_similar_companies(company_name=stock_name, top_n=10)
-            if stock_codes:
-                messages = [
-                    HumanMessage(
-                        content=STOCK_CODE_USER_TEMPLATE.format(
-                            stock_name=stock_name, stock_codes=stock_codes
-                        )
-                    )
-                ]
-                response = await self.llm_with_stock_code.ainvoke(messages)
-                stock_code = response.stock_code
+            # 1) 정확 일치(가장 안정적)
+            listing = _get_stock_listing_map()
+            exact = listing.get((stock_name or "").strip())
+            if exact:
+                stock_code = exact
             else:
-                # 최후 폴백: 상장목록 소스가 모두 실패한 경우라도,
-                # LLM이 유명 종목(예: 삼성전자=005930)을 알고 있으면 동작하도록 유도합니다.
-                fallback_prompt = (
-                    "Please return the 6-digit KRX stock code for the given Stock Name. "
-                    "If unknown, return \"None\".\n\n"
-                    "<Stock_Name>\n"
-                    f"{stock_name}\n"
-                    "</Stock_Name>\n"
-                )
-                response = await self.llm_with_stock_code.ainvoke(
-                    [HumanMessage(content=fallback_prompt)]
-                )
-                stock_code = response.stock_code
+                # 2) 유사도 기반 후보군 → LLM 선택
+                stock_codes = find_similar_companies(company_name=stock_name, top_n=10)
+                if stock_codes:
+                    messages = [
+                        HumanMessage(
+                            content=STOCK_CODE_USER_TEMPLATE.format(
+                                stock_name=stock_name, stock_codes=stock_codes
+                            )
+                        )
+                    ]
+                    response = await self.llm_with_stock_code.ainvoke(messages)
+                    stock_code = response.stock_code
+                else:
+                    # 최후 폴백: 상장목록 로딩 실패 시라도,
+                    # LLM이 유명 종목(예: 삼성전자=005930)을 알고 있으면 동작하도록 유도합니다.
+                    fallback_prompt = (
+                        "Please return the 6-digit KRX stock code for the given Stock Name. "
+                        "If unknown, return \"None\".\n\n"
+                        "<Stock_Name>\n"
+                        f"{stock_name}\n"
+                        "</Stock_Name>\n"
+                    )
+                    response = await self.llm_with_stock_code.ainvoke(
+                        [HumanMessage(content=fallback_prompt)]
+                    )
+                    stock_code = response.stock_code
 
             # 방어: 6자리 숫자 형식이 아니면 None 처리
             if not (isinstance(stock_code, str) and stock_code.isdigit() and len(stock_code) == 6):
                 stock_code = "None"
-            try:
-                subgraph = self.get_subgraph_by_stock_name(stock_name)
-            except Exception as e:
+
+            # 서브그래프는 일부 요청(투자전략/분석)에서만 의미가 있어,
+            # 단순 현재가/가격 문의에서는 Neo4j 경고/오버헤드를 피하기 위해 생략할 수 있습니다.
+            if include_subgraph:
+                try:
+                    subgraph = self.get_subgraph_by_stock_name(stock_name)
+                except Exception:
+                    subgraph = "None"
+            else:
                 subgraph = "None"
         else:
             stock_code = "None"
@@ -351,10 +372,15 @@ class SupervisorAgent:
 
         stock_info = {"subgraph": "None", "stock_name": "None", "stock_code": "None"}
 
+        user_text = message_to_text(state.messages[-1])
+
         stock_task = None
         if state.execute_agent_count == 0:
             stock_task = asyncio.create_task(
-                self.get_stock_name_code_by_query_subgraph(state.messages[-1].content)
+                self.get_stock_name_code_by_query_subgraph(
+                    state.messages[-1].content,
+                    include_subgraph=not _is_price_request(user_text),
+                )
             )
 
         try:
@@ -389,6 +415,22 @@ class SupervisorAgent:
         subgraph = state.subgraph if stock_info["subgraph"] == "None" else stock_info["subgraph"]
         stock_name = state.stock_name if stock_info["stock_name"] == "None" else stock_info["stock_name"]
         stock_code = state.stock_code if stock_info["stock_code"] == "None" else stock_info["stock_code"]
+
+        # 주가/가격/현재가 요청은 TechnicalAnalysisAgent로 강제 라우팅(LLM 라우터 오동작 방지)
+        if stock_code != "None" and _is_price_request(user_text):
+            router_info = RouterList(
+                routers=[
+                    Router(
+                        target="TechnicalAnalysisAgent",
+                        message=user_text,
+                    )
+                ]
+            )
+            logger.info(
+                "Forced routing to TechnicalAnalysisAgent for price request: stock_name=%s stock_code=%s",
+                stock_name,
+                stock_code,
+            )
 
         # 안전장치: 존재하지 않는 agent로 라우팅되면 User 응답으로 폴백
         if router_info.routers[0].target not in self.agents_by_name and router_info.routers[0].target != "User":
