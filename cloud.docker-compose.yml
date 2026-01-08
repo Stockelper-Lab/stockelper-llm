@@ -39,8 +39,7 @@ services:
       - stockelper
 
   db:
-    image: docker.io/postgres:${POSTGRES_VERSION:-16}
-    container_name: stockelper-postgres-llm
+    image: docker.io/postgres:${POSTGRES_VERSION:-latest}
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]

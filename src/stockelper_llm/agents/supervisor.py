@@ -340,8 +340,15 @@ class SupervisorAgent:
 
         return Command(update=update, goto=goto)
 
-    async def get_stock_name_code_by_query_subgraph(self, query: str, *, include_subgraph: bool = True):
-        resp = await self.llm_with_stock_name.ainvoke([HumanMessage(content=STOCK_NAME_USER_TEMPLATE.format(user_request=query))])
+    async def get_stock_name_code_by_query_subgraph(
+        self,
+        query: str,
+        *,
+        include_subgraph: bool = True,
+    ):
+        resp = await self.llm_with_stock_name.ainvoke(
+            [HumanMessage(content=STOCK_NAME_USER_TEMPLATE.format(user_request=query))],
+        )
         stock_name = resp.stock_name
         stock_code = "None"
         subgraph: dict | str = "None"
@@ -354,7 +361,7 @@ class SupervisorAgent:
                 candidates = find_similar_companies(company_name=stock_name, top_n=10)
                 if candidates:
                     resp2 = await self.llm_with_stock_code.ainvoke(
-                        [HumanMessage(content=STOCK_CODE_USER_TEMPLATE.format(stock_name=stock_name, stock_codes=candidates))]
+                        [HumanMessage(content=STOCK_CODE_USER_TEMPLATE.format(stock_name=stock_name, stock_codes=candidates))],
                     )
                     stock_code = resp2.stock_code
                 else:
@@ -365,7 +372,9 @@ class SupervisorAgent:
                         f"{stock_name}\n"
                         "</Stock_Name>\n"
                     )
-                    resp2 = await self.llm_with_stock_code.ainvoke([HumanMessage(content=fallback_prompt)])
+                    resp2 = await self.llm_with_stock_code.ainvoke(
+                        [HumanMessage(content=fallback_prompt)],
+                    )
                     stock_code = resp2.stock_code
 
             if not (isinstance(stock_code, str) and stock_code.isdigit() and len(stock_code) == 6):
@@ -412,7 +421,9 @@ class SupervisorAgent:
                 + "\n</Investment_Report>"
             )
         ]
-        trading_action = await self.llm_with_trading.ainvoke(trading_messages)
+        trading_action = await self.llm_with_trading.ainvoke(
+            trading_messages,
+        )
         # NOTE: 이번 프로젝트에서는 실거래/주문 실행을 하지 않습니다.
         # trading_action은 "추천" 정보로만 반환하고, 사용자 승인(interrupt)/주문(place_order)은 수행하지 않습니다.
         messages = [
@@ -483,7 +494,9 @@ class SupervisorAgent:
             )
 
         try:
-            router_info = await self.llm_with_router.ainvoke(messages)
+            router_info = await self.llm_with_router.ainvoke(
+                messages,
+            )
         except Exception as e:
             logger.exception("Router LLM call failed")
             if stock_task is not None:

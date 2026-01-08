@@ -5,7 +5,7 @@ langgraph
 langchain-community
 langchain-openai
 langchain-huggingface
-langfuse
+langfuse>3.8.0
 pymongo
 lancedb
 FlagEmbedding

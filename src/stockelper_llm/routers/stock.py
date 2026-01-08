@@ -18,18 +18,8 @@ from stockelper_llm.routers.models import ChatRequest, FinalResponse, StreamingS
 
 logger = logging.getLogger(__name__)
 
-_LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "true").lower() not in {"0", "false", "no"}
 _BACKTESTING_SERVICE_URL = os.getenv("STOCKELPER_BACKTESTING_URL", "").strip()
 _PORTFOLIO_SERVICE_URL = os.getenv("STOCKELPER_PORTFOLIO_URL", "").strip()
-
-_langfuse_handler = None
-if _LANGFUSE_ENABLED:
-    try:
-        from langfuse.langchain import CallbackHandler  # type: ignore
-
-        _langfuse_handler = CallbackHandler()
-    except Exception:
-        _langfuse_handler = None
 
 
 CHECKPOINT_DATABASE_URI = to_postgresql_conninfo(
@@ -134,11 +124,6 @@ async def generate_sse_response(multi_agent, input_state, user_id: int, thread_i
             multi_agent.checkpointer = checkpointer
 
             config = {
-                "callbacks": ([_langfuse_handler] if _langfuse_handler is not None else []),
-                "metadata": {
-                    "langfuse_session_id": thread_id,
-                    "langfuse_user_id": user_id,
-                },
                 "configurable": {
                     "user_id": user_id,
                     "thread_id": thread_id,
