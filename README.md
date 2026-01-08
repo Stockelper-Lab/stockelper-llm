@@ -2,6 +2,14 @@
 
 LangGraph 기반 다중 에이전트 시스템을 활용한 AI 주식 분석 서비스입니다.
 
+## 📁 코드 구조 (중요)
+
+- **신규 구현**: `src/`  
+  - LangChain **v1 `create_agent`** 기반 전문 에이전트 + **미들웨어(progress/tool 스트리밍)**
+  - API I/O는 레거시와 동일하게 `/stock/chat` SSE 스트리밍을 유지합니다.
+- **레거시 보관**: `legacy/`  
+  - 이전 구현 전체를 그대로 보관합니다.
+
 ## 🚀 주요 기능
 
 - **다중 에이전트 시스템**: SupervisorAgent가 4개의 전문 에이전트를 조율

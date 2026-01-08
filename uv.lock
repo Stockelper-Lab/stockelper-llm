@@ -2719,6 +2719,9 @@ wheels = [
 binary = [
     { name = "psycopg-binary", marker = "implementation_name != 'pypy'" },
 ]
+pool = [
+    { name = "psycopg-pool" },
+]
 
 [[package]]
 name = "psycopg-binary"
@@ -3722,6 +3725,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "finance-datareader" },
     { name = "google-api-python-client" },
+    { name = "greenlet" },
     { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-classic" },
@@ -3741,7 +3745,7 @@ dependencies = [
     { name = "pandas" },
     { name = "plotly" },
     { name = "prophet" },
-    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pymongo" },
     { name = "python-dotenv" },
     { name = "requests" },
@@ -3803,6 +3807,7 @@ requires-dist = [
     { name = "flake8", marker = "extra == 'dev'" },
     { name = "google-api-python-client" },
     { name = "google-api-python-client", marker = "extra == 'ml'" },
+    { name = "greenlet" },
     { name = "httpx" },
     { name = "isort", marker = "extra == 'dev'" },
     { name = "lancedb", marker = "extra == 'ml'" },
@@ -3836,7 +3841,7 @@ requires-dist = [
     { name = "plotly" },
     { name = "prophet" },
     { name = "prophet", marker = "extra == 'ml'" },
-    { name = "psycopg", extras = ["binary"], specifier = "==3.2.*" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = "==3.2.*" },
     { name = "pymongo" },
     { name = "pymongo", marker = "extra == 'ml'" },
     { name = "pytest", marker = "extra == 'dev'" },
