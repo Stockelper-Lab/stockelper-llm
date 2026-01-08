@@ -4,13 +4,12 @@ services:
     container_name: stockelper-llm-server
     build:
       context: .
+      dockerfile: Dockerfile
     ports:
       - "21009:21009"
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ${HOME}/.cache/huggingface/hub:/root/.cache/huggingface/hub
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:21009/health || exit 1"]
       interval: 30s
@@ -18,22 +17,30 @@ services:
       retries: 3
       start_period: 60s
     env_file:
-      - .env.cloud
+      - .env
+      # - .env.cloud
     environment:
-      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/stockelper_web
-      - ASYNC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/stockelper_web
-      - CHECKPOINT_DATABASE_URI=postgresql://postgres:postgres@db:5432/checkpoint
       # 컨테이너 분리: Chat API만 제공
-      - STOCKELPER_SERVICE=chat
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
-      - REQUESTS_TIMEOUT=300
-      # LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are loaded from .env.cloud
+      STOCKELPER_SERVICE: ${STOCKELPER_SERVICE:-chat}
+      REQUESTS_TIMEOUT: ${REQUESTS_TIMEOUT:-300}
+
+      # DB (기본: compose 내부 db 서비스)
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/stockelper_web}
+      ASYNC_DATABASE_URL: ${ASYNC_DATABASE_URL:-}
+      CHECKPOINT_DATABASE_URI: ${CHECKPOINT_DATABASE_URI:-postgresql://postgres:postgres@db:5432/checkpoint}
+      DATABASE_URL_KSIC: ${DATABASE_URL_KSIC:-postgresql://postgres:postgres@db:5432/ksic}
+      ASYNC_DATABASE_URL_KSIC: ${ASYNC_DATABASE_URL_KSIC:-}
+
+      # Neo4j(선택): 로컬 Neo4j 컨테이너를 쓸 경우 아래처럼 설정하세요.
+      # NEO4J_URI: ${NEO4J_URI:-neo4j://neo4j:7687}
+      # NEO4J_USER: ${NEO4J_USER:-neo4j}
+      # NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
     networks:
-      stockelper:
-      internal:
+      - stockelper
 
   db:
-    image: docker.io/postgres:${POSTGRES_VERSION:-latest}
+    image: docker.io/postgres:${POSTGRES_VERSION:-16}
+    container_name: stockelper-postgres-llm
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -41,26 +48,49 @@ services:
       timeout: 3s
       retries: 10
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres # CHANGEME
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres} # CHANGEME
       POSTGRES_DB: postgres
     ports:
-      - 5432:5432
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-multiple-db.sh:/docker-entrypoint-initdb.d/init-multiple-db.sh:ro
     networks:
-      stockelper:
-      internal:
+      - stockelper
+
+  # 선택: Neo4j 로컬 실행 (필요 시 `--profile neo4j`로 켜세요)
+  neo4j:
+    profiles: ["neo4j"]
+    image: docker.io/neo4j:${NEO4J_VERSION:-5}
+    container_name: stockelper-neo4j
+    restart: always
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/password} # CHANGEME
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - stockelper
 
 volumes:
   postgres_data:
     driver: local
+  neo4j_data:
+    driver: local
 
 networks:
   stockelper:
-    driver: bridge
-    name: stockelper
+    # 다른 스택(포트폴리오/백테스팅 등)과 네트워크 공유가 필요하면 고정 이름을 사용합니다.
     external: true
-  internal:
+    name: stockelper
     driver: bridge
+

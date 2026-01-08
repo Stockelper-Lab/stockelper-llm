@@ -9,3 +9,4 @@ def test_parse_kis_mst_text_extracts_name_and_code():
     assert mapping["삼성전자"] == "005930"
 
 
+
