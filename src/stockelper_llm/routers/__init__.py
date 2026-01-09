@@ -1,2 +1,2 @@
-__all__ = ["base", "stock", "models"]
+__all__ = ["base", "stock", "models", "backtesting"]
 

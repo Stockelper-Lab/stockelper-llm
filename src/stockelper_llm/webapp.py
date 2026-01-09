@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 dotenv.load_dotenv(override=True)
 
 from stockelper_llm.routers.base import router as base_router
+from stockelper_llm.routers.backtesting import router as backtesting_router
 from stockelper_llm.routers.stock import router as stock_router
 
 
@@ -25,5 +26,6 @@ app.add_middleware(
 )
 
 app.include_router(base_router)
+app.include_router(backtesting_router)
 app.include_router(stock_router)
 

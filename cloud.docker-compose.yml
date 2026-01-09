@@ -24,6 +24,13 @@ services:
       STOCKELPER_SERVICE: ${STOCKELPER_SERVICE:-chat}
       REQUESTS_TIMEOUT: ${REQUESTS_TIMEOUT:-300}
 
+      # 외부 서비스 URL(선택이지만, 백테스트 트리거/해석에 필요)
+      STOCKELPER_BACKTESTING_URL: ${STOCKELPER_BACKTESTING_URL:-}
+
+      # 백테스트 해석(내부 후처리)
+      STOCKELPER_BACKTESTING_ANALYSIS_MODEL: ${STOCKELPER_BACKTESTING_ANALYSIS_MODEL:-}
+      BACKTEST_ANALYSIS_HTTP_TIMEOUT: ${BACKTEST_ANALYSIS_HTTP_TIMEOUT:-60}
+
       # DB (기본: compose 내부 db 서비스)
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/stockelper_web}
       ASYNC_DATABASE_URL: ${ASYNC_DATABASE_URL:-}

@@ -15,6 +15,7 @@ from stockelper_llm.core.db_urls import to_async_sqlalchemy_url, to_postgresql_c
 from stockelper_llm.core.langchain_compat import iter_stream_tokens, message_to_text
 from stockelper_llm.multi_agent import get_multi_agent
 from stockelper_llm.routers.models import ChatRequest, FinalResponse, StreamingStatus
+from stockelper_llm.agents.backtesting_request_agent import request_backtesting_job
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +247,7 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
                 msg = (
                     "백테스팅 기능은 별도 서비스로 분리되어 있습니다.\n"
                     "백테스팅 서버를 실행한 뒤, 환경변수 STOCKELPER_BACKTESTING_URL을 설정해주세요.\n"
-                    "예) STOCKELPER_BACKTESTING_URL=http://localhost:21011"
+                    "예) STOCKELPER_BACKTESTING_URL=http://localhost:21007"
                 )
                 return StreamingResponse(
                     generate_simple_sse(msg),
@@ -260,14 +261,11 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
                 )
 
             try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.post(
-                        f"{_BACKTESTING_SERVICE_URL.rstrip('/')}/api/backtesting/execute",
-                        json={"user_id": user_id, "stock_symbol": None, "strategy_type": None, "query": query},
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    job_id = data.get("job_id") or data.get("jobId")
+                # 포트폴리오 트리거와 동일 선상: "요청 변환(LLM) + API 호출"을 에이전트로 분리
+                # - 내부에서 LLM(structured output)로 parameters를 만들고,
+                # - backtesting 서버에 /api/backtesting/execute 요청을 보냅니다.
+                data = await request_backtesting_job(user_id=user_id, user_text=query)
+                job_id = data.get("job_id") or data.get("jobId")
             except Exception:
                 msg = (
                     "백테스팅 요청에 실패했습니다.\n"

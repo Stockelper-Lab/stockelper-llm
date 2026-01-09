@@ -82,6 +82,14 @@ SSE 스트리밍 채팅 인터페이스
 ### GET /health
 헬스 체크
 
+### POST /internal/backtesting/interpret (내부)
+백테스트 완료 결과를 **LLM으로 해석**하고 `stockelper_web.public.backtesting`의 `analysis_*` 컬럼에 저장합니다.
+
+- 입력: `{ "user_id": 1, "job_id": "<uuid>", "force": false }`
+- 요구 환경변수:
+  - `STOCKELPER_BACKTESTING_URL` (결과 파일 다운로드를 위해 필요)
+  - `OPENAI_API_KEY` (LLM 호출)
+
 ## 🗄️ 데이터베이스
 
 ### PostgreSQL (3개 데이터베이스)
@@ -140,6 +148,10 @@ LANGFUSE_HOST=http://localhost:21003
 STOCKELPER_SERVICE=chat           # "chat" 또는 "all"
 STOCKELPER_BACKTESTING_URL=       # 백테스팅 서비스 URL (선택)
 STOCKELPER_PORTFOLIO_URL=         # 포트폴리오 추천 서비스 URL (예: http://portfolio-server:21008)
+
+# (선택) 백테스트 해석 모델/타임아웃
+STOCKELPER_BACKTESTING_ANALYSIS_MODEL=
+BACKTEST_ANALYSIS_HTTP_TIMEOUT=60
 ```
 
 ## 🐳 Docker 실행
