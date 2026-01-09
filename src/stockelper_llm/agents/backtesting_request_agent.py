@@ -116,8 +116,11 @@ class BacktestParametersDraft(BaseModel):
     )
 
     # DART 공시 설정
-    use_dart_disclosure: bool = Field(
-        default=True, description="DART 공시 데이터 사용 여부"
+    # NOTE: Optional[bool]로 설정하여 LLM이 명시하지 않으면 None으로 두고,
+    # 이후 처리에서 True로 강제 설정합니다.
+    use_dart_disclosure: Optional[bool] = Field(
+        default=None,
+        description="DART 공시 데이터 사용 여부 (명시하지 않으면 기본 True)"
     )
 
     # 이벤트별 지표 조건
@@ -430,8 +433,16 @@ async def build_backtest_parameters_from_user_text(user_text: str) -> Dict[str, 
         merged.setdefault("max_portfolio_size", len(syms))
         merged.setdefault("max_positions", max(1, min(10, len(syms))))
 
-    # 기본 DART 모드 유지
-    merged.setdefault("use_dart_disclosure", True)
+    # ============================================================
+    # DART 공시 모드 강제 설정
+    # ============================================================
+    # LLM이 use_dart_disclosure를 명시적으로 False로 설정하지 않는 한,
+    # 기본적으로 DART 공시를 사용합니다 (True).
+    # None이거나 누락된 경우 True로 설정합니다.
+    if merged.get("use_dart_disclosure") is None:
+        merged["use_dart_disclosure"] = True
+        logger.info("use_dart_disclosure 기본값 적용: True")
+
     return merged
 
 
