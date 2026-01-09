@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import logging
 import os
 import re
 from typing import Any, Dict, List, Literal, Optional
@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Literal, Optional
 import httpx
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, field_validator
+
+from stockelper_llm.integrations.stock_listing import find_similar_companies, lookup_stock_code
+
+logger = logging.getLogger(__name__)
 
 
 _STOCK_CODE_PAT = re.compile(r"\b\d{6}\b")
@@ -304,6 +308,49 @@ def _convert_indicator_conditions(conditions: List[IndicatorCondition]) -> List[
     return result
 
 
+def _resolve_corp_names_to_symbols(corp_names: List[str]) -> List[str]:
+    """회사명 리스트를 종목코드 리스트로 변환.
+
+    LLM 서버에서 백테스팅 서버로 요청 전송 전에 호출됩니다.
+    KIS 종목마스터를 사용하여 변환하며, 정확히 매칭되지 않으면
+    유사한 종목명을 찾아 변환을 시도합니다.
+
+    Returns:
+        변환에 성공한 종목코드 리스트. 실패한 종목명은 로그에 기록됩니다.
+    """
+    if not corp_names:
+        return []
+
+    symbols: List[str] = []
+    for name in corp_names:
+        name = (name or "").strip()
+        if not name:
+            continue
+
+        # 1) 정확한 매칭 시도
+        code = lookup_stock_code(name)
+        if code:
+            symbols.append(code)
+            logger.info("종목명 → 종목코드 변환 성공: %s → %s", name, code)
+            continue
+
+        # 2) 유사한 종목명 찾기
+        similar = find_similar_companies(name, top_n=5)
+        if similar:
+            # 가장 유사한 종목의 코드 사용
+            first_name = next(iter(similar.keys()))
+            first_code = similar[first_name]
+            symbols.append(first_code)
+            logger.info(
+                "종목명 → 종목코드 변환 (유사 매칭): %s → %s (원래 요청: %s)",
+                first_name, first_code, name
+            )
+        else:
+            logger.warning("종목명 → 종목코드 변환 실패 (매칭 없음): %s", name)
+
+    return symbols
+
+
 async def build_backtest_parameters_from_user_text(user_text: str) -> Dict[str, Any]:
     """유저 자연어 → 백테스트 파라미터 dict (LLM + fallback).
 
@@ -393,12 +440,40 @@ async def request_backtesting_job(*, user_id: int, user_text: str) -> Dict[str, 
 
     포트폴리오 트리거와 동일하게, '요청'은 LLM 서버가 만들고,
     실행/결과 적재/해석은 (backtesting/worker + llm/internal/interpret) 체계로 처리합니다.
+
+    NOTE: 종목명(target_corp_names)은 LLM 서버에서 종목코드(target_symbols)로 변환한 후
+    백테스팅 서버로 전송합니다. 백테스팅 서버/워커는 종목코드만 처리하면 됩니다.
     """
 
     base = _get_backtesting_service_url()
 
     params = await build_backtest_parameters_from_user_text(user_text)
+
+    # ============================================================
+    # 종목명 → 종목코드 변환 (LLM 서버에서 처리)
+    # ============================================================
+    # target_corp_names가 있고 target_symbols가 없으면 변환 수행
+    target_corp_names = params.get("target_corp_names") if isinstance(params, dict) else None
     target_symbols = params.get("target_symbols") if isinstance(params, dict) else None
+
+    if target_corp_names and isinstance(target_corp_names, list):
+        # 종목명 → 종목코드 변환
+        resolved_symbols = _resolve_corp_names_to_symbols(target_corp_names)
+
+        if resolved_symbols:
+            # 기존 target_symbols와 병합 (중복 제거)
+            existing_symbols = target_symbols if isinstance(target_symbols, list) else []
+            merged_symbols = sorted(set(existing_symbols + resolved_symbols))
+            params["target_symbols"] = merged_symbols
+            target_symbols = merged_symbols
+            logger.info(
+                "종목명 → 종목코드 변환 완료: %s → %s",
+                target_corp_names, resolved_symbols
+            )
+
+        # 변환 후 target_corp_names는 제거 (백테스팅 서버에서 불필요)
+        # 단, 로그/디버깅 용도로 유지할 수도 있음
+        # params.pop("target_corp_names", None)
 
     payload: Dict[str, Any] = {
         "user_id": int(user_id),
