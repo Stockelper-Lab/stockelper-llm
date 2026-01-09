@@ -292,16 +292,70 @@ class SupervisorAgent:
         results = await asyncio.gather(*tasks)
 
         agent_results: list[dict] = []
+        extracted_subgraph: dict = {}
+
         for router, result in results:
             last_msg = result.get("messages", [])[-1] if result.get("messages") else None
-            agent_results.append(router | {"result": message_to_text(last_msg)})
+            result_text = message_to_text(last_msg)
+            agent_results.append(router | {"result": result_text})
+
+            # GraphRAGAgent 결과에서 subgraph 추출
+            if router.get("target") == "GraphRAGAgent" and result_text:
+                extracted = self._extract_subgraph_from_agent_result(result, result_text)
+                if extracted:
+                    extracted_subgraph = extracted
+
+        # 기존 subgraph와 병합 (새로 추출된 것이 더 풍부하면 대체)
+        new_subgraph = state.subgraph if isinstance(state.subgraph, dict) else {}
+        if extracted_subgraph:
+            existing_nodes = len((new_subgraph or {}).get("node", []))
+            new_nodes = len(extracted_subgraph.get("node", []))
+            if new_nodes > existing_nodes:
+                new_subgraph = extracted_subgraph
 
         update = {
             "agent_messages": [],
             "agent_results": state.agent_results + agent_results,
             "execute_agent_count": state.execute_agent_count + 1,
+            "subgraph": new_subgraph,
         }
         return Command(update=update, goto="supervisor")
+
+    def _extract_subgraph_from_agent_result(self, result: dict, result_text: str) -> dict | None:
+        """GraphRAGAgent 결과에서 subgraph를 추출합니다.
+
+        1. 메시지에서 <subgraph>...</subgraph> 태그 파싱
+        2. tool_calls 결과에서 subgraph 추출
+        """
+        # 방법 1: 메시지에서 subgraph JSON 태그 파싱
+        subgraph_match = re.search(r'<subgraph>([\s\S]*?)</subgraph>', result_text)
+        if subgraph_match:
+            try:
+                return json.loads(subgraph_match.group(1))
+            except Exception:
+                pass
+
+        # 방법 2: 도구 호출 결과에서 subgraph 추출 (메시지 히스토리 탐색)
+        messages = result.get("messages", [])
+        for msg in reversed(messages):
+            # ToolMessage의 content에서 subgraph 추출 시도
+            content = getattr(msg, "content", None)
+            if not content:
+                continue
+
+            if isinstance(content, str):
+                # JSON 형식의 도구 결과
+                try:
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and "subgraph" in parsed:
+                        return parsed["subgraph"]
+                except Exception:
+                    pass
+
+            elif isinstance(content, dict) and "subgraph" in content:
+                return content["subgraph"]
+
+        return None
 
     async def execute_trading(self, state: State, config: RunnableConfig):
         human_check = interrupt("interrupt")
