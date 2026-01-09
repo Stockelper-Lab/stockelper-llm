@@ -214,7 +214,7 @@ async def _update_analysis_completed(
             job_id,
             int(user_id),
             analysis_md,
-            dict(analysis_json),
+            json.dumps(analysis_json, ensure_ascii=False, default=str),  # asyncpg jsonb 호환
             float(elapsed_seconds),
         )
     finally:
