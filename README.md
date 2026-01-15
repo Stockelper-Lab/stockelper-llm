@@ -1,6 +1,6 @@
 # Stockelper LLM Service
 
-> LangGraph 기반 다중 에이전트 시스템을 활용한 AI 주식 투자 분석 서비스
+> Stockelper-Lab에서 LLM 기반 “대화/분석 오케스트레이션”을 담당하는 FastAPI 서비스 (SSE 스트리밍)
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688.svg)](https://fastapi.tiangolo.com/)
@@ -10,6 +10,7 @@
 
 - [개요](#개요)
 - [주요 기능](#-주요-기능)
+- [Stockelper-Lab 연동](#-stockelper-lab-연동)
 - [기술 스택](#-기술-스택)
 - [에이전트 시스템](#-에이전트-시스템)
 - [코드 구조](#-코드-구조)
@@ -25,26 +26,44 @@
 
 ## 개요
 
-**Stockelper LLM Service**는 LangGraph 기반 다중 에이전트 시스템을 활용하여 한국 주식 시장 분석 및 투자 전략 추천을 제공하는 AI 서비스입니다. SupervisorAgent가 4개의 전문 에이전트(시장 분석, 기본적 분석, 기술적 분석, 투자 전략)를 조율하여 실시간 스트리밍 방식으로 종합적인 투자 인사이트를 제공합니다.
+**Stockelper LLM Service**는 Stockelper-Lab 전체 시스템에서 **LLM 기반 대화/분석 오케스트레이션**을 담당합니다.
+
+- **메인 인터페이스**: `POST /stock/chat` (SSE 스트리밍: progress/delta/final)
+- **오케스트레이션**: LangGraph 기반 `SupervisorAgent`가 전문 에이전트를 병렬 실행/통합
+- **현재 구현(`src/`) 기준 에이전트**: Market / Fundamental(예시 구현) / Technical(현재가) / InvestmentStrategy(전략 리포트) / GraphRAG(Neo4j)
+- **중요**: 이 프로젝트의 채팅 인터페이스는 **실거래 주문 실행(승인/거부) 기능을 지원하지 않습니다.** `trading_action`은 “추천 정보”로만 반환됩니다.
+- **연동 서비스**: 포트폴리오 추천/백테스팅은 **별도 서비스**이며, 채팅에서는 트리거 및(백테스트의 경우) 결과 해석 저장만 수행합니다.
 
 ## ✨ 주요 기능
 
-- **다중 에이전트 시스템**: SupervisorAgent가 4개의 전문 에이전트를 조율
-- **실시간 스트리밍**: Server-Sent Events (SSE)로 토큰 단위 응답 제공
-- **한국 주식 시장 특화**: KIS API, DART, KRX 데이터 통합
-- **자동 거래 제안**: 투자 전략에 기반한 매매 액션 생성
-- **지식 그래프 통합**: Neo4j 기반 기업 관계 분석
-- **백테스팅 연동**: 전략 검증 및 LLM 기반 결과 해석
-- **포트폴리오 추천**: 투자자 성향 기반 맞춤형 포트폴리오
+- **다중 에이전트 시스템**: SupervisorAgent가 여러 전문 에이전트를 조율(병렬 실행/결과 통합)
+- **실시간 스트리밍(SSE)**: `progress`(진행) / `delta`(토큰) / `final`(최종) 이벤트 전송
+- **종목 식별**: 종목명 → 6자리 종목코드 매핑(KIS 종목마스터 `.mst.zip`)
+- **KIS 연동(옵션)**: 현재가/계좌 요약 조회(토큰 자동 발급/갱신 포함)
+- **지식 그래프(옵션)**: Neo4j GraphRAG로 근거 기반 답변 + FE 그래프 시각화용 `subgraph` 반환
+- **백테스팅 연동**: 채팅에서 백테스트 job 트리거 + 내부 API로 결과 해석 저장(`POST /internal/backtesting/interpret`)
+- **포트폴리오 연동**: 채팅에서 직접 추천을 생성하지 않고, 포트폴리오 서비스 트리거 후 “추천 페이지” 안내
+- **거래(제한)**: `trading_action`은 “추천 주문” 형태로만 제공(채팅에서 주문 실행/승인 미지원)
+
+## 🧩 Stockelper-Lab 연동
+
+- **Frontend(`stockelper-fe`) → LLM**: Next.js 서버가 `LLM_ENDPOINT/stock/chat`로 SSE 요청을 프록시합니다. (`stockelper-fe/src/app/api/chat/route.ts`)
+  - FE 환경변수: `LLM_ENDPOINT` 또는 `NEXT_PUBLIC_LLM_ENDPOINT`
+- **LLM → Backtesting**: 메시지에 “백테스트/백테스팅”이 포함되면 `STOCKELPER_BACKTESTING_URL`의 `/api/backtesting/execute`로 job을 트리거합니다.
+  - 완료된 결과 해석/저장은 `POST /internal/backtesting/interpret`가 담당합니다.
+- **LLM → Portfolio**: 포트폴리오 추천 요청이면 `STOCKELPER_PORTFOLIO_URL`의 `/portfolio/recommendations`를 트리거하고, 사용자는 포트폴리오 추천 페이지에서 결과를 확인합니다.
+- **LLM ↔ DB**: `DATABASE_URL`(stockelper_web, users/backtesting) + `CHECKPOINT_DATABASE_URI`(LangGraph checkpoints; 미지정 시 DATABASE_URL 사용)
+- **LLM ↔ Neo4j(옵션)**: GraphRAG/서브그래프 반환을 위해 `NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD` 설정이 필요합니다.
+- **Docker 네트워크**: 여러 스택(LLM/Backtesting/Portfolio 등)을 함께 띄울 때 `stockelper` external network를 공유합니다.
 
 ## 📋 기술 스택
 
 ### AI/ML
 - **LangGraph**: 다중 에이전트 오케스트레이션
 - **LangChain 1.0+**: 에이전트 및 도구 체인 구성
-- **OpenAI GPT-4/GPT-5.1**: 대화 및 분석 모델
-- **Prophet & ARIMA**: 주가 예측 앙상블 모델
-- **LangFuse**: 옵저버빌리티 및 추적 (선택사항)
+- **OpenAI (기본: gpt-5.1)**: 라우팅/전략 생성 + Web Search Tool(뉴스 요약)
+- **Prophet & ARIMA**: (레거시/확장) 주가 예측 앙상블
+- **LangFuse**: (레거시/확장) 옵저버빌리티 및 추적
 
 ### 웹 프레임워크
 - **FastAPI 0.111**: 비동기 웹 프레임워크
@@ -54,8 +73,7 @@
 ### 데이터베이스
 - **PostgreSQL**: 사용자 데이터, 체크포인트, 산업 분류
 - **Neo4j**: 기업 관계 지식 그래프
-- **MongoDB**: 문서 저장소 (선택사항)
-- **Redis**: 캐싱 및 세션 관리
+- **MongoDB / Redis**: (레거시/확장) 문서/캐시 저장소
 
 ### 데이터 분석
 - **Pandas**: 데이터 처리
@@ -65,9 +83,11 @@
 
 ### 외부 API
 - **KIS (한국투자증권)**: 실시간 주가, 계좌 관리, 주문
-- **DART (금융감독원)**: 재무제표, 기업 공시
-- **OpenRouter/Perplexity**: 뉴스 검색 및 분석
-- **YouTube Data API**: 투자 콘텐츠 분석
+- **Neo4j**: 지식 그래프 조회/GraphRAG
+- **Backtesting / Portfolio Service**: 별도 서비스 연동(트리거/해석)
+- **DART/OpenRouter/YouTube**: (레거시/확장) 직접 연동 예정/참고
+
+> 참고: `docker-compose.yml`에는 현재 **PostgreSQL(db 프로필)**과 **Neo4j(neo4j 프로필)**만 포함되어 있습니다. Redis/LangFuse 등은 레거시/확장 항목이며 기본 compose에서 실행되지 않습니다.
 
 ## 🤖 에이전트 시스템
 
@@ -77,17 +97,17 @@
 ┌─────────────────────────────────────────────────────────┐
 │                    SupervisorAgent                      │
 │  - 사용자 질의 라우팅                                      │
-│  - 종목 식별 (한국거래소 종목명 매칭)                        │
-│  - 거래 액션 생성 및 승인 요청                              │
+│  - 종목 식별 (종목명→6자리 종목코드)                         │
+│  - 결과 통합 + (추천) trading_action 생성                   │
 └────────────┬────────────────────────────────────────────┘
              │
-     ┌───────┴───────┬───────────────┬───────────────┐
-     │               │               │               │
-┌────▼────┐   ┌─────▼─────┐   ┌────▼────┐   ┌─────▼─────┐
-│ Market  │   │Fundamental│   │Technical│   │Investment │
-│Analysis │   │ Analysis  │   │ Analysis│   │ Strategy  │
-│ Agent   │   │  Agent    │   │  Agent  │   │   Agent   │
-└─────────┘   └───────────┘   └─────────┘   └───────────┘
+     ┌───────┴───────┬───────────────┬───────────────┬───────────────┬───────────────┐
+     │               │               │               │               │               │
+┌────▼────┐   ┌─────▼─────┐   ┌────▼────┐   ┌─────▼─────┐   ┌─────▼─────┐
+│ Market  │   │Fundamental│   │Technical│   │Investment │   │  GraphRAG  │
+│Analysis │   │ Analysis  │   │ Analysis│   │ Strategy  │   │   Agent    │
+│ Agent   │   │  Agent    │   │  Agent  │   │   Agent   │   │  (Neo4j)   │
+└─────────┘   └───────────┘   └─────────┘   └───────────┘   └───────────┘
 ```
 
 ### SupervisorAgent (관리자)
@@ -95,86 +115,94 @@
 **역할:**
 - 사용자 질의를 분석하여 적절한 전문 에이전트로 라우팅
 - 한국거래소 종목명 매칭을 통한 종목 코드 식별
-- 최종 거래 액션 생성 및 사용자 승인 요청
+- 최종 응답 통합 및 (추천) `trading_action` 생성 *(채팅에서 주문 실행은 하지 않음)*
 - 각 에이전트의 분석 결과 통합
 
 **주요 기능:**
 - 종목명 → 종목코드 변환 (KIS 종목마스터 데이터 활용)
 - 다중 에이전트 워크플로우 조율
-- 거래 액션 JSON 생성 (매수/매도 제안)
+- 거래 액션 JSON 생성 (추천 주문 형태로만 반환)
 - Neo4j 서브그래프 데이터 추출
 
 ### MarketAnalysisAgent (시장 분석)
 
-**역할:** 뉴스, 리포트, 소셜 미디어 등을 분석하여 시장 심리 및 트렌드 파악
+**역할:** 최신 뉴스/이슈를 검색해 요약합니다. *(현재 구현은 OpenAI Web Search Tool 기반)*
 
 **도구:**
 
 | 도구명 | 설명 | 데이터 소스 |
 |-------|------|------------|
-| `SearchNewsTool` | Perplexity API를 통한 최신 뉴스 검색 | OpenRouter/Perplexity |
-| `SearchReportTool` | 증권사 리포트 및 투자 분석 자료 검색 | 웹 검색 |
-| `YouTubeSearchTool` | YouTube 투자 콘텐츠 검색 및 자막 분석 | YouTube Data API |
-| `ReportSentimentAnalysisTool` | 리포트 감정 분석 (긍정/중립/부정) | LLM 기반 분석 |
-| `GraphQATool` | Neo4j 관계 그래프 기반 기업 분석 | Neo4j |
+| `search_news` | OpenAI Web Search Tool로 최신 뉴스/소식 검색 후 요약 | OpenAI |
 
 **분석 결과:**
-- 시장 심리 (긍정적/부정적/중립적)
-- 주요 뉴스 헤드라인
-- 경쟁사 동향
-- 산업 트렌드
+- 주요 뉴스/이슈 요약 및 링크
+
+> 참고: 리포트/YouTube/감성분석 등은 `legacy/` 또는 확장 포인트입니다. 지식그래프 기반 근거 응답은 `GraphRAGAgent`가 담당합니다.
 
 ### FundamentalAnalysisAgent (기본적 분석)
 
-**역할:** DART 재무제표를 분석하여 기업의 재무 건전성 평가
+**역할:** *(현재 `src/`에서는 예시 구현)* 재무/공시 기반 기본적 분석 확장 포인트입니다.
 
 **도구:**
 
 | 도구명 | 설명 | 분석 지표 |
 |-------|------|-----------|
-| `AnalysisFinancialStatementTool` | DART API로 5개년 재무제표 수집 및 분석 | - 유동비율<br>- 부채비율<br>- 유보율<br>- ROE (자기자본이익률)<br>- 이자보상배율<br>- 매출액 증가율<br>- 영업이익률 |
+| `analyze_financial_statement` | 현재는 예시(스텁) 구현. DART/재무제표 분석 로직을 연결해 확장 | (확장) 유동/부채/ROE 등 |
 
 **분석 결과:**
-- 재무 건전성 평가 (안전/보통/위험)
-- 수익성 지표
-- 성장성 지표
-- 유동성 분석
-- 재무 리스크 평가
+- (현재) 스텁 응답(구현 안내)
+- (확장) DART/재무제표 기반 지표/리스크 평가
 
 ### TechnicalAnalysisAgent (기술적 분석)
 
-**역할:** 주가 차트 및 기술적 지표를 분석하여 매매 타이밍 제안
+**역할:** 현재가/시세 등 가격 정보를 조회합니다. *(현재 구현은 KIS 현재가 조회 중심)*
 
 **도구:**
 
 | 도구명 | 설명 | 기능 |
 |-------|------|------|
-| `AnalysisStockTool` | KIS API를 통한 실시간 주가 및 시장 정보 조회 | - 현재가, 시가, 고가, 저가<br>- 거래량, 거래대금<br>- 52주 최고/최저<br>- PER, PBR, EPS |
-| `PredictStockTool` | Prophet + ARIMA 앙상블 예측 모델 | - 단기 주가 예측 (1-30일)<br>- 신뢰 구간 제공<br>- 트렌드 분석 |
-| `StockChartAnalysisTool` | 차트 이미지 분석 (GPT-4 Vision) | - 패턴 인식<br>- 지지/저항선 식별<br>- 매매 시그널 |
+| `analysis_stock` | KIS API를 통한 현재가/시세 조회 | 현재가, 고가/저가, 거래량, PER/PBR 등 |
 
 **분석 결과:**
-- 기술적 매매 시그널 (매수/매도/관망)
-- 주가 예측 및 신뢰 구간
-- 차트 패턴 분석
-- 거래량 분석
+- 현재가/거래량/주요 지표 요약(KIS 응답 기반)
+- (확장) 차트 패턴/예측/기술지표 계산은 레거시/확장 항목
 
 ### InvestmentStrategyAgent (투자 전략)
 
-**역할:** 계좌 정보와 투자 전략을 분석하여 포트폴리오 제안 및 주문 생성
+**역할:** 분석 결과를 바탕으로 “규칙·검증·리스크 통제” 중심의 투자 전략 리포트를 생성합니다. *(채팅에서 주문 실행은 하지 않음)*
 
 **도구:**
 
 | 도구명 | 설명 | 기능 |
 |-------|------|------|
-| `GetAccountInfoTool` | KIS API로 계좌 잔고 조회 | - 보유 종목 및 수량<br>- 평가금액 및 손익<br>- 예수금 (가용 현금)<br>- 총자산 |
-| `InvestmentStrategySearchTool` | 투자 전략 웹 검색 | - 가치투자<br>- 성장투자<br>- 배당투자<br>- 모멘텀 전략 |
+| `get_account_info` | (옵션) KIS API로 계좌 요약 조회 | 예수금/총평가 |
+| `analysis_stock` | (재사용) KIS 현재가/시세 조회 | 가격/지표 근거 확보 |
+| `search_news` | (재사용) OpenAI Web Search Tool로 최신 뉴스 요약 | 이슈/근거 링크 |
+| `financial_knowledge_graph_analysis` | (옵션) Neo4j 서브그래프/근거 조회 | 공시/이벤트/문서 URL |
 
 **분석 결과:**
-- 투자 전략 제안
-- 포트폴리오 비중 조정
-- 매수/매도 수량 계산
-- 리스크 관리 방안
+- 투자 전략 리포트(진입/청산/리스크 관리/검증 계획)
+- (선택) 계좌/현재가/뉴스/지식그래프 근거 기반 요약
+- (참고) `trading_action`은 “추천 주문” 형태로만 반환(주문 실행 없음)
+
+### GraphRAGAgent (지식 그래프)
+
+**역할:** Neo4j 지식그래프에서 공시/이벤트/관계/타임라인 근거를 조회해 답변을 생성합니다. 응답 끝에 FE 시각화용 `<subgraph>...</subgraph>`를 포함합니다.
+
+**파이프라인(요약):**
+- `graph_rag_pipeline`: 의도 분류 → Cypher 생성 → (읽기 전용) 쿼리 실행 → 컨텍스트 생성
+
+**도구:**
+
+| 도구명 | 설명 |
+|-------|------|
+| `graph_rag_pipeline` | GraphRAG 전체 파이프라인(권장) |
+| `classify_intent` | 질문 의도/엔티티 분류 |
+| `generate_cypher_query` | 의도 기반 Cypher 생성 |
+| `execute_graph_query` | 안전한(read-only) Cypher 실행 및 subgraph 반환 |
+| `financial_knowledge_graph_analysis` | 레거시 호환용 서브그래프 조회 |
+
+> 참고: Cypher 실행은 보안 상 위험 키워드(DELETE/CREATE 등)를 차단하며, 결과는 `{node, relation}` 포맷으로 반환됩니다.
 
 ## 📁 코드 구조
 
@@ -215,14 +243,21 @@ cp env.example .env
 ### 4. Docker Compose 실행
 
 ```bash
-# 기본 서비스 시작 (LLM Server + PostgreSQL)
+# (필수) 네트워크 준비: compose는 external network `stockelper`를 사용합니다.
+# 이미 존재하면 에러가 나도 무시해도 됩니다.
+docker network create stockelper
+
+# LLM Server만 시작
 docker-compose up -d
 
-# LangFuse 포함 실행 (옵저버빌리티)
-docker-compose --profile langfuse up -d
+# PostgreSQL 포함 시작 (프로필)
+docker-compose --profile db up -d
 
 # Neo4j 포함 실행
 docker-compose --profile neo4j up -d
+
+# DB + Neo4j 모두 포함
+docker-compose --profile db --profile neo4j up -d
 
 # 로그 확인
 docker-compose logs -f llm-server
@@ -277,7 +312,11 @@ SSE 스트리밍 채팅 인터페이스 - 사용자 질의에 대한 AI 응답�
 - `user_id` (int, required): 사용자 ID (PostgreSQL `users` 테이블 참조)
 - `thread_id` (string, required): 대화 스레드 UUID (LangGraph 체크포인트 식별자)
 - `message` (string, required): 사용자 메시지
-- `human_feedback` (object, optional): 거래 액션 승인/거부 피드백
+- `human_feedback` (bool, optional): 현재 채팅에서 주문 실행을 지원하지 않으며, 값이 전달되면 안내 메시지를 반환합니다.
+
+**특수 처리(채팅 전 처리):**
+- 메시지에 “백테스트/백테스팅”이 포함되면 백테스팅 서비스로 job을 트리거하고 즉시 안내 메시지를 반환합니다.
+- 포트폴리오 추천 요청으로 판단되면 포트폴리오 서비스 트리거 후 “추천 페이지에서 확인” 안내를 반환합니다.
 
 **Response (SSE Stream):**
 
@@ -305,16 +344,18 @@ SSE 스트리밍 채팅 인터페이스 - 사용자 질의에 대한 AI 응답�
 {
   "type": "final",
   "message": "삼성전자 투자 분석 결과...",
-  "trading_action": {
-    "action": "buy",
-    "stock_code": "005930",
-    "quantity": 10,
-    "price": 70000
-  },
   "subgraph": {
-    "nodes": [...],
-    "edges": [...]
-  }
+    "node": [...],
+    "relation": [...]
+  },
+  "trading_action": {
+    "stock_code": "005930",
+    "order_side": "buy",
+    "order_type": "limit",
+    "order_price": 70000,
+    "order_quantity": 10
+  },
+  "error": null
 }
 ```
 
@@ -326,8 +367,11 @@ SSE 스트리밍 채팅 인터페이스 - 사용자 질의에 대한 AI 응답�
 **에러 응답:**
 ```json
 {
-  "type": "error",
-  "error": "에러 메시지"
+  "type": "final",
+  "message": "처리 중 오류가 발생했습니다.",
+  "subgraph": {},
+  "trading_action": null,
+  "error": "RuntimeError: ..."
 }
 ```
 
@@ -338,9 +382,7 @@ SSE 스트리밍 채팅 인터페이스 - 사용자 질의에 대한 AI 응답�
 **Response:**
 ```json
 {
-  "status": "healthy",
-  "service": "stockelper-llm",
-  "version": "0.1.0"
+  "status": "healthy"
 }
 ```
 
@@ -365,15 +407,13 @@ SSE 스트리밍 채팅 인터페이스 - 사용자 질의에 대한 AI 응답�
 **Response:**
 ```json
 {
-  "status": "success",
+  "ok": true,
   "job_id": "backtesting-uuid-123",
-  "analysis_md": "# 백테스트 분석 결과\n...",
-  "analysis_json": {
-    "summary": "...",
-    "key_metrics": {...}
-  }
+  "analysis_status": "completed"
 }
 ```
+
+> `analysis_md`/`analysis_json`은 응답으로 반환하지 않고, `stockelper_web.<schema>.<table>`의 `analysis_*` 컬럼에 저장합니다.
 
 **필수 환경 변수:**
 - `STOCKELPER_BACKTESTING_URL`: 백테스팅 서비스 URL
@@ -386,13 +426,13 @@ SSE 스트리밍 채팅 인터페이스 - 사용자 질의에 대한 AI 응답�
 ### AI 서비스
 
 ```bash
-# OpenAI API (GPT-4, GPT-5.1)
+# OpenAI API (기본: gpt-5.1)
 OPENAI_API_KEY=sk-proj-...
 
 # (선택) 통일된 LLM 모델 지정
 STOCKELPER_LLM_MODEL=gpt-5.1
 
-# OpenRouter/Perplexity (뉴스 검색)
+# (레거시/확장) OpenRouter API (현재 `src/` 기본 플로우에서는 미사용)
 OPENROUTER_API_KEY=sk-or-...
 
 # 금융감독원 DART API
@@ -452,7 +492,7 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 ```
 
-### Redis
+### Redis (레거시/확장)
 
 ```bash
 REDIS_HOST=redis
@@ -460,7 +500,7 @@ REDIS_PORT=6379
 REDIS_AUTH=password
 ```
 
-### LangFuse (선택사항 - 옵저버빌리티)
+### LangFuse (레거시/확장)
 
 ```bash
 LANGFUSE_ENABLED=true
@@ -468,6 +508,8 @@ LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_HOST=http://localhost:21003
 ```
+
+> 참고: `src/` 기본 동작은 Redis/LangFuse를 직접 사용하지 않습니다. 관련 환경변수는 레거시/확장(다른 스택과의 통합) 용도로 유지되어 있습니다.
 
 ### 서비스 설정
 
@@ -503,20 +545,20 @@ BACKTEST_ANALYSIS_HTTP_TIMEOUT=60
 ### Docker Compose를 이용한 배포 (권장)
 
 ```bash
+# (필수) 네트워크 준비: compose는 external network `stockelper`를 사용합니다.
+docker network create stockelper
+
 # 모든 서비스 시작 (LLM Server만)
 docker-compose up -d
 
 # 데이터베이스 포함 시작
 docker-compose --profile db up -d
 
-# LangFuse 포함 시작
-docker-compose --profile langfuse up -d
-
 # Neo4j 포함 시작
 docker-compose --profile neo4j up -d
 
-# 모든 프로필 포함
-docker-compose --profile db --profile langfuse --profile neo4j up -d
+# DB + Neo4j 포함
+docker-compose --profile db --profile neo4j up -d
 
 # 로그 확인
 docker-compose logs -f llm-server
@@ -534,10 +576,10 @@ docker-compose down -v
 |--------|------|------|
 | LLM Server | 21009 | FastAPI 서버 |
 | PostgreSQL | 5432 | 데이터베이스 |
-| Redis | 6379 | 캐시 서버 |
 | Neo4j Browser | 7474 | 웹 인터페이스 |
 | Neo4j Bolt | 7687 | 드라이버 연결 |
-| LangFuse | 21003 | 옵저버빌리티 대시보드 |
+
+> PostgreSQL/Neo4j는 각각 `--profile db` / `--profile neo4j`로 실행했을 때만 노출됩니다.
 
 ### 커스텀 Docker 이미지 빌드
 
@@ -561,9 +603,7 @@ docker logs -f stockelper-llm
 - [ ] `.env` 파일에 모든 필수 환경 변수 설정
 - [ ] KIS API 실전투자 URL 및 TR ID 확인
 - [ ] PostgreSQL 데이터베이스 백업 설정
-- [ ] Redis 인증 비밀번호 설정
 - [ ] Neo4j 비밀번호 변경
-- [ ] LangFuse 추적 설정 (선택)
 - [ ] Docker 네트워크 설정 (`stockelper` 네트워크)
 - [ ] 로그 로테이션 설정
 - [ ] 헬스 체크 및 모니터링 알람 설정
@@ -591,9 +631,8 @@ stockelper-llm/
 │       │   └── base.py               # 기본 라우터
 │       ├── integrations/             # 외부 통합
 │       │   ├── neo4j_subgraph.py     # Neo4j 그래프 추출
-│       │   ├── kis_client.py         # KIS API 클라이언트
-│       │   ├── dart_client.py        # DART API 클라이언트
-│       │   └── stock_master.py       # 종목 마스터 관리
+│       │   ├── kis.py                # KIS API 연동(현재가/계좌 요약, users 테이블)
+│       │   └── stock_listing.py      # KIS 종목마스터 다운로드/종목명→코드 매핑
 │       └── core/                     # 핵심 유틸리티
 │           ├── db_urls.py            # DB URL 파싱
 │           ├── json_safety.py        # JSON 안전 처리
@@ -623,6 +662,12 @@ stockelper-llm/
 #### 1. stockelper_web
 
 사용자 및 서비스 데이터를 저장하는 메인 데이터베이스
+
+> 이 LLM 서비스가 직접 사용하는 최소 요구사항(스키마는 `STOCKELPER_WEB_SCHEMA` 기준):
+> - **`users`**: `kis_app_key`, `kis_app_secret`, `kis_access_token`, `account_no` 등(KIS 연동용)
+> - **`backtesting`**: `analysis_*` 컬럼들(백테스트 해석 저장용, `POST /internal/backtesting/interpret`)
+>
+> 그 외 테이블(예: `conversations`, `chats`)은 `stockelper-fe`/다른 서비스의 스키마/마이그레이션으로 관리될 수 있습니다.
 
 **주요 테이블:**
 
@@ -728,27 +773,29 @@ LangGraph 상태 체크포인트를 저장하는 데이터베이스
 기업 관계 지식 그래프
 
 **주요 노드:**
-- `Company`: 상장 기업
-- `StockPrice`: 주가 스냅샷
-- `Event`: 기업 이벤트
-- `Industry`: 산업 분류
+- `Company`: 기업 기본 정보(회사명/종목코드 등)
+- `Event`: 공시/이벤트
+- `Document`: 공시 문서(URL 포함)
+- `StockPrice`: 일별 가격 스냅샷
+- `Sector`: 업종/섹터
+- `(옵션) FinancialStatements / Indicator / News`: 확장 노드
 
 **주요 관계:**
-- `COMPETES_WITH`: 경쟁사 관계
-- `BELONGS_TO`: 산업 소속
-- `HAS_SNAPSHOT`: 주가 데이터
-- `AFFECTED_BY`: 이벤트 영향
+- `INVOLVED_IN`: (Company)-[:INVOLVED_IN]->(Event)
+- `REPORTED_BY`: (Event)-[:REPORTED_BY]->(Document)
+- `HAS_STOCK_PRICE`: (Company)-[:HAS_STOCK_PRICE]->(StockPrice)
+- `BELONGS_TO`: (Company)-[:BELONGS_TO]->(Sector)
+- `HAS_COMPETITOR`: (Company)-[:HAS_COMPETITOR]->(Company)
+
+> 실제 스키마/의도 카테고리는 `src/stockelper_llm/integrations/neo4j_subgraph.py`의 `GRAPH_SCHEMA`/`INTENT_CATEGORIES`를 참고하세요.
 
 ### MongoDB (선택)
 
 문서 저장소 (현재 미사용)
 
-### Redis
+### Redis (레거시/확장)
 
-캐싱 및 세션 관리
-- KIS 토큰 캐싱
-- API 응답 캐싱
-- 레이트 리밋 카운터
+캐싱 및 세션 관리(현재 `src/` 기본 플로우에서는 미사용)
 
 ## 개발 가이드
 
@@ -953,9 +1000,7 @@ services:
         limits:
           memory: 4G
 
-# Prophet 모델 캐싱 비활성화
-# src/stockelper_llm/integrations/stock_predictor.py
-# 예측 모델의 캐시 크기 조정
+# (참고) Prophet/예측 모델 관련 최적화는 레거시/확장 항목입니다.
 ```
 
 ### 7. DART API 속도 제한
@@ -965,7 +1010,9 @@ services:
 **해결책**:
 - DART API는 일일 10,000건 제한
 - 요청 간격을 두고 호출
-- 캐싱 활용 (Redis)
+- (선택) 캐싱/재시도 정책 적용
+
+> 참고: 현재 `src/` 기본 플로우는 DART를 직접 호출하지 않습니다. (해당 항목은 레거시/확장 시나리오에 해당)
 
 ## 보안
 
@@ -997,14 +1044,14 @@ docker exec -it stockelper-neo4j cypher-shell
 
 ### 1. 응답 속도 개선
 
-- Redis 캐싱 활용
+- 종목마스터(.mst) 다운로드 결과는 프로세스 내 캐시(최초 1회)
 - 병렬 도구 호출 (LangGraph 자동 처리)
 - 불필요한 도구 호출 최소화
 
 ### 2. 메모리 최적화
 
 - LangGraph 체크포인트 정리 (오래된 대화)
-- Prophet 모델 캐시 크기 제한
+- SummarizationMiddleware(토큰 임계치)로 대화/도구 결과 요약
 - 배치 처리 크기 조정
 
 ### 3. 데이터베이스 최적화
@@ -1020,21 +1067,13 @@ EXPLAIN ANALYZE SELECT * FROM chats WHERE conversation_id = 'uuid';
 
 ## 모니터링
 
-### LangFuse 대시보드
+### 통합 점검(권장)
+
+환경변수/외부 연동(OpenAI/DB/Neo4j/KIS 종목마스터 등) 연결 상태를 빠르게 확인하려면 아래 스크립트를 사용하세요.
 
 ```bash
-# LangFuse 시작
-docker-compose --profile langfuse up -d
-
-# 브라우저에서 접속
-open http://localhost:21003
+uv run python scripts/healthcheck_integrations.py
 ```
-
-**주요 메트릭:**
-- 에이전트별 응답 시간
-- 도구 호출 빈도
-- LLM 토큰 사용량
-- 에러 발생률
 
 ### 로그 모니터링
 
