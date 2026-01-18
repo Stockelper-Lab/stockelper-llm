@@ -110,6 +110,106 @@
 └─────────┘   └───────────┘   └─────────┘   └───────────┘   └───────────┘
 ```
 
+### 🗺️ 멀티 에이전트 시스템 구조도 (Mermaid, `src/` 기준)
+
+```mermaid
+flowchart LR
+  %% =========================
+  %% Stockelper LLM Multi-Agent System (src 기준)
+  %% =========================
+
+  U[User Query] --> API["FastAPI<br/>POST /stock/chat (SSE)"]
+
+  %% Pre-routing (special handlers)
+  API --> PRE{"Pre-routing<br/>portfolio/backtest?"}
+  PRE -->|Portfolio request| P_TRIGGER["Trigger Portfolio Service<br/>(async)"]
+  P_TRIGGER --> P_GUIDE["SSE: final 안내<br/>(포트폴리오 페이지에서 확인)"] --> OUT["SSE Stream to User<br/>progress/delta/final/[DONE]"]
+
+  PRE -->|Backtest request| B_TRIGGER["Trigger Backtesting Service<br/>/api/backtesting/execute"]
+  B_TRIGGER --> B_GUIDE["SSE: final 안내<br/>(job_id 반환)"] --> OUT
+
+  PRE -->|Normal chat| CP["Checkpoint Setup<br/>PostgreSQL (LangGraph)"] --> SUP
+
+  %% Supervisor orchestrator
+  subgraph SUP["SupervisorAgent (LangGraph StateGraph)"]
+    direction TB
+    S0["Routing & Orchestration<br/>(LLM structured output)"] --> S1["Stock Identify (name/code)"]
+    S1 --> S2["(Optional) Subgraph preload<br/>Neo4j get_subgraph_*"]
+    S2 --> S3{"Delegate or Respond?"}
+
+    S3 -->|delegate| EXEC["execute_agent<br/>(parallel)"]
+    S3 -->|respond directly| DIRECT["Direct response"]
+    DIRECT --> FINAL["Final compose<br/>message + subgraph + trading_action(recommendation)"]
+  end
+
+  %% Parallel execution of specialists
+  EXEC --> MA
+  EXEC --> FA
+  EXEC --> TA
+  EXEC --> ISA
+  EXEC --> GRA
+
+  %% =========================
+  %% 5 Specialist Agents + Tools
+  %% =========================
+
+  subgraph MA["MarketAnalysisAgent (LangChain create_agent)"]
+    direction TB
+    MA_T1["tool: search_news<br/>(OpenAI Web Search Tool)"]
+  end
+
+  subgraph FA["FundamentalAnalysisAgent (LangChain create_agent)"]
+    direction TB
+    FA_T1["tool: analyze_financial_statement<br/>(stub / 확장 포인트)"]
+  end
+
+  subgraph TA["TechnicalAnalysisAgent (LangChain create_agent)"]
+    direction TB
+    TA_T1["tool: analysis_stock<br/>(KIS 현재가/시세 조회)"]
+  end
+
+  subgraph ISA["InvestmentStrategyAgent (LangChain create_agent)"]
+    direction TB
+    ISA_T1["tool: get_account_info<br/>(KIS 잔고 요약)"]
+    ISA_T2["tool: analysis_stock<br/>(KIS 현재가/시세)"]
+    ISA_T3["tool: search_news<br/>(OpenAI Web Search Tool)"]
+    ISA_T4["tool: financial_knowledge_graph_analysis<br/>(Neo4j 서브그래프/근거)"]
+  end
+
+  subgraph GRA["GraphRAGAgent (LangChain create_agent)"]
+    direction TB
+    GRA_P["tool: graph_rag_pipeline<br/>(의도→Cypher→조회→컨텍스트)"]
+    GRA_T1["tool: classify_intent"]
+    GRA_T2["tool: generate_cypher_query"]
+    GRA_T3["tool: execute_graph_query<br/>(read-only + 안전키워드 차단)"]
+    GRA_T4["tool: financial_knowledge_graph_analysis<br/>(legacy fallback)"]
+    GRA_P --> GRA_T1 --> GRA_T2 --> GRA_T3
+  end
+
+  %% Tool dependencies (external systems)
+  MA_T1 --> OPENAI["OpenAI Responses API<br/>web_search_preview"]
+  ISA_T3 --> OPENAI
+
+  TA_T1 --> KIS["KIS OpenAPI"]
+  ISA_T1 --> KIS
+  ISA_T2 --> KIS
+
+  S2 --> NEO4J["Neo4j Knowledge Graph"]
+  ISA_T4 --> NEO4J
+  GRA_T3 --> NEO4J
+  GRA_T4 --> NEO4J
+
+  %% Results flow back to Supervisor
+  MA --> S0
+  FA --> S0
+  TA --> S0
+  ISA --> S0
+  GRA --> S0
+
+  %% Streaming output to user
+  FINAL --> OUT
+```
+
 ### SupervisorAgent (관리자)
 
 **역할:**
