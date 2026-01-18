@@ -7,11 +7,10 @@ from typing import Any
 
 import aiohttp
 import requests
-from sqlalchemy import Column, Integer, TIMESTAMP, Text, select
+from sqlalchemy import TIMESTAMP, Column, Integer, Text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
-
 
 Base = declarative_base()
 
@@ -69,7 +68,9 @@ async def get_user_kis_credentials(async_engine: Any, user_id: int):
         return None
 
 
-async def update_user_kis_credentials(async_engine: Any, user_id: int, access_token: str):
+async def update_user_kis_credentials(
+    async_engine: Any, user_id: int, access_token: str
+):
     async with AsyncSession(async_engine) as session:
         stmt = select(User).where(User.id == user_id)
         result = await session.execute(stmt)
@@ -84,7 +85,11 @@ async def update_user_kis_credentials(async_engine: Any, user_id: int, access_to
 async def get_access_token(app_key: str, app_secret: str) -> str | None:
     url = f"{KIS_BASE_URL}/oauth2/tokenP"
     headers = {"content-type": "application/json"}
-    body = {"grant_type": "client_credentials", "appkey": app_key, "appsecret": app_secret}
+    body = {
+        "grant_type": "client_credentials",
+        "appkey": app_key,
+        "appsecret": app_secret,
+    }
 
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -112,10 +117,14 @@ async def get_user_kis_context(
 
     access_token = user_info.get("kis_access_token")
     if not access_token:
-        access_token = await get_access_token(user_info["kis_app_key"], user_info["kis_app_secret"])
+        access_token = await get_access_token(
+            user_info["kis_app_key"], user_info["kis_app_secret"]
+        )
         if not access_token:
             if require:
-                raise ValueError("KIS access token 발급 실패 (app_key/app_secret 확인 필요)")
+                raise ValueError(
+                    "KIS access token 발급 실패 (app_key/app_secret 확인 필요)"
+                )
             return None
 
         await update_user_kis_credentials(async_engine, user_id, access_token)
@@ -132,7 +141,9 @@ async def refresh_user_kis_access_token(
     if not user_info:
         raise ValueError(f"user_id={user_id} 사용자를 DB에서 찾지 못했습니다.")
 
-    access_token = await get_access_token(user_info["kis_app_key"], user_info["kis_app_secret"])
+    access_token = await get_access_token(
+        user_info["kis_app_key"], user_info["kis_app_secret"]
+    )
     if not access_token:
         raise ValueError("KIS access token 재발급 실패")
 
@@ -140,7 +151,9 @@ async def refresh_user_kis_access_token(
     return access_token
 
 
-async def check_account_balance(app_key: str, app_secret: str, access_token: str, account_no: str):
+async def check_account_balance(
+    app_key: str, app_secret: str, access_token: str, account_no: str
+):
     url = f"{KIS_BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance"
     headers = {
         "Content-Type": "application/json",
@@ -167,7 +180,9 @@ async def check_account_balance(app_key: str, app_secret: str, access_token: str
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         try:
-            async with session.get(url, headers=headers, params=params, timeout=30) as res:
+            async with session.get(
+                url, headers=headers, params=params, timeout=30
+            ) as res:
                 if res.status == 200:
                     res_data = await res.json()
                     if res_data.get("rt_cd") == "0":
@@ -195,13 +210,18 @@ async def get_current_price(async_engine: Any, user_id: int, stock_code: str) ->
     """
     stock_code = (stock_code or "").strip()
     if not stock_code or stock_code == "None":
-        return {"error": "6자리 종목코드(stock_code)가 필요합니다.", "stock_code": stock_code}
+        return {
+            "error": "6자리 종목코드(stock_code)가 필요합니다.",
+            "stock_code": stock_code,
+        }
 
     user_info = await get_user_kis_context(async_engine, user_id, require=False)
     if not user_info:
         # 서비스 계정 기반(환경변수) fallback: DB에 user가 없는 경우에도 조회 가능하도록
         app_key = (os.getenv("KIS_APP_KEY") or os.getenv("KIS_APPKEY") or "").strip()
-        app_secret = (os.getenv("KIS_APP_SECRET") or os.getenv("KIS_APPSECRET") or "").strip()
+        app_secret = (
+            os.getenv("KIS_APP_SECRET") or os.getenv("KIS_APPSECRET") or ""
+        ).strip()
         if not app_key or not app_secret:
             return {
                 "error": "KIS 자격증명/계좌정보가 없어 현재가를 조회할 수 없습니다. (users 테이블 또는 KIS_APP_KEY/KIS_APP_SECRET 필요)",
@@ -319,10 +339,16 @@ async def get_current_price(async_engine: Any, user_id: int, stock_code: str) ->
         }
 
 
-def get_hashkey(app_key: str, app_secret: str, body_data: dict, url_base: str | None = None):
+def get_hashkey(
+    app_key: str, app_secret: str, body_data: dict, url_base: str | None = None
+):
     url_base = (url_base or KIS_BASE_URL).rstrip("/")
     url = f"{url_base}/uapi/hashkey"
-    headers = {"content-type": "application/json", "appkey": app_key, "appsecret": app_secret}
+    headers = {
+        "content-type": "application/json",
+        "appkey": app_key,
+        "appsecret": app_secret,
+    }
     res = requests.post(url, headers=headers, data=json.dumps(body_data))
     if res.status_code == 200:
         return res.json().get("HASH")
@@ -392,4 +418,3 @@ def place_order(
             return data.get("msg1", str(e))
         except Exception:
             return f"주문 요청 실패: {str(e)}"
-

@@ -147,7 +147,12 @@ def _as_props(obj: Any) -> dict[str, Any]:
 def _node_name(label: str, props: dict[str, Any]) -> str:
     """FE에서 node_name으로 id를 만들기 때문에, 충돌을 피하도록 유니크 이름을 만든다."""
     if label == "Company":
-        return str(props.get("corp_name") or props.get("stock_code") or props.get("corp_code") or "Company")
+        return str(
+            props.get("corp_name")
+            or props.get("stock_code")
+            or props.get("corp_code")
+            or "Company"
+        )
 
     if label == "Event":
         base = str(props.get("disclosure_name") or props.get("event_id") or "Event")
@@ -157,7 +162,12 @@ def _node_name(label: str, props: dict[str, Any]) -> str:
         return base
 
     if label == "Document":
-        title = str(props.get("report_nm") or props.get("title") or props.get("rcept_no") or "Document")
+        title = str(
+            props.get("report_nm")
+            or props.get("title")
+            or props.get("rcept_no")
+            or "Document"
+        )
         rcept_no = props.get("rcept_no")
         if rcept_no and str(rcept_no) not in title:
             return f"{title} ({rcept_no})"
@@ -185,15 +195,27 @@ def _node_name(label: str, props: dict[str, Any]) -> str:
     return label
 
 
-def _add_node(nodes: dict[str, dict], label: str, props: dict[str, Any]) -> tuple[str, str]:
+def _add_node(
+    nodes: dict[str, dict], label: str, props: dict[str, Any]
+) -> tuple[str, str]:
     name = _node_name(label, props)
     key = f"{label}::{name}"
     if key not in nodes:
-        nodes[key] = {"node_type": label, "node_name": name, "properties": to_jsonable(props)}
+        nodes[key] = {
+            "node_type": label,
+            "node_name": name,
+            "properties": to_jsonable(props),
+        }
     return label, name
 
 
-def _add_relation(relations: dict[tuple[str, str, str, str, str], dict], *, start: tuple[str, str], rel_type: str, end: tuple[str, str]) -> None:
+def _add_relation(
+    relations: dict[tuple[str, str, str, str, str], dict],
+    *,
+    start: tuple[str, str],
+    rel_type: str,
+    end: tuple[str, str],
+) -> None:
     (s_type, s_name) = start
     (e_type, e_name) = end
     key = (s_type, s_name, rel_type, e_type, e_name)
@@ -230,7 +252,12 @@ def get_subgraph_by_stock_code(
     max_prices: int = 20,
 ) -> dict:
     """현재 온톨로지(Company/Event/Document/StockPrice/Date 축)에 맞춘 서브그래프 조회."""
-    return get_subgraph(stock_code=stock_code, company_name=None, max_events=max_events, max_prices=max_prices)
+    return get_subgraph(
+        stock_code=stock_code,
+        company_name=None,
+        max_events=max_events,
+        max_prices=max_prices,
+    )
 
 
 def get_subgraph_by_company_name(
@@ -239,7 +266,12 @@ def get_subgraph_by_company_name(
     max_events: int = 10,
     max_prices: int = 20,
 ) -> dict:
-    return get_subgraph(stock_code=None, company_name=company_name, max_events=max_events, max_prices=max_prices)
+    return get_subgraph(
+        stock_code=None,
+        company_name=company_name,
+        max_events=max_events,
+        max_prices=max_prices,
+    )
 
 
 def get_subgraph(
@@ -304,25 +336,36 @@ def get_subgraph(
                 if e is not None:
                     e_label = _first_label(getattr(e, "labels", None))
                     e_node = _add_node(nodes, e_label, _as_props(e))
-                    _add_relation(relations, start=c_node, rel_type="INVOLVED_IN", end=e_node)
+                    _add_relation(
+                        relations, start=c_node, rel_type="INVOLVED_IN", end=e_node
+                    )
 
                     d = row.get("d")
                     if d is not None:
                         d_label = _first_label(getattr(d, "labels", None))
                         d_node = _add_node(nodes, d_label, _as_props(d))
-                        _add_relation(relations, start=e_node, rel_type="REPORTED_BY", end=d_node)
+                        _add_relation(
+                            relations, start=e_node, rel_type="REPORTED_BY", end=d_node
+                        )
 
                     ed = row.get("ed")
                     if ed is not None:
                         ed_label = _first_label(getattr(ed, "labels", None))
                         ed_node = _add_node(nodes, ed_label, _as_props(ed))
-                        _add_relation(relations, start=e_node, rel_type="OCCURRED_ON", end=ed_node)
+                        _add_relation(
+                            relations, start=e_node, rel_type="OCCURRED_ON", end=ed_node
+                        )
 
                         dt = row.get("dt")
                         if dt is not None:
                             dt_label = _first_label(getattr(dt, "labels", None))
                             dt_node = _add_node(nodes, dt_label, _as_props(dt))
-                            _add_relation(relations, start=ed_node, rel_type="IS_DATE", end=dt_node)
+                            _add_relation(
+                                relations,
+                                start=ed_node,
+                                rel_type="IS_DATE",
+                                end=dt_node,
+                            )
 
             # 3) 시세(최근 일부만)
             price_rows = session.run(
@@ -342,19 +385,25 @@ def get_subgraph(
                     continue
                 sp_label = _first_label(getattr(sp, "labels", None))
                 sp_node = _add_node(nodes, sp_label, _as_props(sp))
-                _add_relation(relations, start=c_node, rel_type="HAS_STOCK_PRICE", end=sp_node)
+                _add_relation(
+                    relations, start=c_node, rel_type="HAS_STOCK_PRICE", end=sp_node
+                )
 
                 pd = row.get("pd")
                 if pd is not None:
                     pd_label = _first_label(getattr(pd, "labels", None))
                     pd_node = _add_node(nodes, pd_label, _as_props(pd))
-                    _add_relation(relations, start=sp_node, rel_type="RECORDED_ON", end=pd_node)
+                    _add_relation(
+                        relations, start=sp_node, rel_type="RECORDED_ON", end=pd_node
+                    )
 
                     dt = row.get("dt")
                     if dt is not None:
                         dt_label = _first_label(getattr(dt, "labels", None))
                         dt_node = _add_node(nodes, dt_label, _as_props(dt))
-                        _add_relation(relations, start=pd_node, rel_type="IS_DATE", end=dt_node)
+                        _add_relation(
+                            relations, start=pd_node, rel_type="IS_DATE", end=dt_node
+                        )
 
         return {"node": list(nodes.values()), "relation": list(relations.values())}
     except Exception:
@@ -418,7 +467,15 @@ def execute_cypher_query(
 
     # 보안: 위험한 쿼리 패턴 차단
     cypher_upper = cypher.upper()
-    dangerous_keywords = ["DELETE", "REMOVE", "DROP", "CREATE", "MERGE", "SET", "DETACH"]
+    dangerous_keywords = [
+        "DELETE",
+        "REMOVE",
+        "DROP",
+        "CREATE",
+        "MERGE",
+        "SET",
+        "DETACH",
+    ]
     for kw in dangerous_keywords:
         if kw in cypher_upper:
             return {
@@ -449,7 +506,7 @@ def execute_cypher_query(
                     if hasattr(value, "labels"):
                         label = _first_label(getattr(value, "labels", None))
                         props = _as_props(value)
-                        node_key = _add_node(nodes, label, props)
+                        _add_node(nodes, label, props)
                         row_data[key] = {
                             "type": "node",
                             "label": label,
@@ -470,13 +527,21 @@ def execute_cypher_query(
                         end_props = _as_props(end_node)
                         end_key = _add_node(nodes, end_label, end_props)
 
-                        _add_relation(relations, start=start_key, rel_type=rel_type, end=end_key)
+                        _add_relation(
+                            relations, start=start_key, rel_type=rel_type, end=end_key
+                        )
 
                         row_data[key] = {
                             "type": "relationship",
                             "rel_type": rel_type,
-                            "start": {"label": start_label, "properties": to_jsonable(start_props)},
-                            "end": {"label": end_label, "properties": to_jsonable(end_props)},
+                            "start": {
+                                "label": start_label,
+                                "properties": to_jsonable(start_props),
+                            },
+                            "end": {
+                                "label": end_label,
+                                "properties": to_jsonable(end_props),
+                            },
                         }
 
                     # Path 처리
@@ -486,14 +551,18 @@ def execute_cypher_query(
                             label = _first_label(getattr(n, "labels", None))
                             props = _as_props(n)
                             _add_node(nodes, label, props)
-                            path_nodes.append({"label": label, "properties": to_jsonable(props)})
+                            path_nodes.append(
+                                {"label": label, "properties": to_jsonable(props)}
+                            )
 
                         for rel in value.relationships:
                             rel_type = rel.type
                             start_node = rel.start_node
                             end_node = rel.end_node
 
-                            start_label = _first_label(getattr(start_node, "labels", None))
+                            start_label = _first_label(
+                                getattr(start_node, "labels", None)
+                            )
                             start_props = _as_props(start_node)
                             start_key = _add_node(nodes, start_label, start_props)
 
@@ -501,7 +570,12 @@ def execute_cypher_query(
                             end_props = _as_props(end_node)
                             end_key = _add_node(nodes, end_label, end_props)
 
-                            _add_relation(relations, start=start_key, rel_type=rel_type, end=end_key)
+                            _add_relation(
+                                relations,
+                                start=start_key,
+                                rel_type=rel_type,
+                                end=end_key,
+                            )
 
                         row_data[key] = {"type": "path", "nodes": path_nodes}
 
@@ -549,10 +623,21 @@ def validate_cypher_query(cypher: str) -> dict[str, Any]:
 
     # 보안 검사
     cypher_upper = cypher.upper()
-    dangerous_keywords = ["DELETE", "REMOVE", "DROP", "CREATE", "MERGE", "SET", "DETACH"]
+    dangerous_keywords = [
+        "DELETE",
+        "REMOVE",
+        "DROP",
+        "CREATE",
+        "MERGE",
+        "SET",
+        "DETACH",
+    ]
     for kw in dangerous_keywords:
         if kw in cypher_upper:
-            return {"valid": False, "error": f"보안 정책: {kw} 키워드는 허용되지 않습니다."}
+            return {
+                "valid": False,
+                "error": f"보안 정책: {kw} 키워드는 허용되지 않습니다.",
+            }
 
     driver = GraphDatabase.driver(uri, auth=(user, password))
     try:
@@ -569,7 +654,9 @@ def validate_cypher_query(cypher: str) -> dict[str, Any]:
             pass
 
 
-def format_subgraph_for_context(subgraph: dict, *, max_nodes: int = 30, max_relations: int = 50) -> str:
+def format_subgraph_for_context(
+    subgraph: dict, *, max_nodes: int = 30, max_relations: int = 50
+) -> str:
     """서브그래프를 LLM 컨텍스트용 텍스트로 변환합니다.
 
     Args:
@@ -604,9 +691,15 @@ def format_subgraph_for_context(subgraph: dict, *, max_nodes: int = 30, max_rela
                 name = n.get("node_name", "")
                 if props:
                     # 주요 속성만 표시
-                    key_props = {k: v for k, v in props.items() if v is not None and k not in {"id", "element_id"}}
+                    key_props = {
+                        k: v
+                        for k, v in props.items()
+                        if v is not None and k not in {"id", "element_id"}
+                    }
                     if key_props:
-                        props_str = ", ".join(f"{k}={v}" for k, v in list(key_props.items())[:5])
+                        props_str = ", ".join(
+                            f"{k}={v}" for k, v in list(key_props.items())[:5]
+                        )
                         lines.append(f"  - {name}: {props_str}")
                     else:
                         lines.append(f"  - {name}")
@@ -630,7 +723,9 @@ def format_subgraph_for_context(subgraph: dict, *, max_nodes: int = 30, max_rela
             start = r.get("start", {})
             end = r.get("end", {})
             rel_type = r.get("relationship", "UNKNOWN")
-            lines.append(f"  ({start.get('name', '?')}) -[{rel_type}]-> ({end.get('name', '?')})")
+            lines.append(
+                f"  ({start.get('name', '?')}) -[{rel_type}]-> ({end.get('name', '?')})"
+            )
 
     # Raw 결과 요약 (테이블 형식 데이터)
     if raw_results:
@@ -647,4 +742,3 @@ def format_subgraph_for_context(subgraph: dict, *, max_nodes: int = 30, max_rela
             lines.append(f"  {i+1}. {', '.join(row_items)}")
 
     return "\n".join(lines)
-

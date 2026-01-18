@@ -89,4 +89,3 @@ def iter_stream_tokens(text: str) -> Iterable[str]:
 
     if buf:
         yield buf
-

@@ -13,7 +13,6 @@ from stockelper_llm.agents.specialists import (
 )
 from stockelper_llm.agents.supervisor import SupervisorAgent
 
-
 _CACHED_GRAPH: Any | None = None
 _CACHE_LOCK = asyncio.Lock()
 
@@ -41,7 +40,11 @@ async def get_multi_agent(async_database_url: str):
         investment_strategy_agent = build_investment_strategy_agent(async_database_url)
         graph_rag_agent = build_graph_rag_agent()
 
-        model = (os.getenv("STOCKELPER_LLM_MODEL") or os.getenv("STOCKELPER_MODEL") or "gpt-5.1").strip()
+        model = (
+            os.getenv("STOCKELPER_LLM_MODEL")
+            or os.getenv("STOCKELPER_MODEL")
+            or "gpt-5.1"
+        ).strip()
 
         graph = SupervisorAgent(
             model=model,
@@ -57,4 +60,3 @@ async def get_multi_agent(async_database_url: str):
         )
         _CACHED_GRAPH = graph
         return graph
-

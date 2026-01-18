@@ -722,6 +722,7 @@ stockelper-llm/
 │       │   ├── supervisor.py         # SupervisorAgent
 │       │   ├── specialists.py        # 전문 에이전트들
 │       │   ├── backtesting_request_agent.py  # 백테스팅 에이전트
+│       │   ├── portfolio_request_agent.py    # 포트폴리오 추천 요청 파라미터 생성/트리거
 │       │   ├── progress_middleware.py        # 진행 상태 미들웨어
 │       │   └── tool_error_middleware.py      # 도구 에러 핸들링
 │       ├── routers/                  # API 라우터
@@ -749,7 +750,6 @@ stockelper-llm/
 ├── pyproject.toml                    # 프로젝트 메타데이터
 ├── uv.lock                           # 의존성 잠금 파일
 ├── env.example                       # 환경 변수 예시
-├── requirements.txt                  # Python 의존성
 ├── init-multiple-db.sh               # PostgreSQL 다중 DB 초기화
 ├── .pre-commit-config.yaml           # Pre-commit 훅
 └── README.md
@@ -991,8 +991,8 @@ uv run black src/ tests/
 # isort import 정렬
 uv run isort src/ tests/
 
-# flake8 린트
-uv run flake8 src/ tests/
+# ruff 린트
+uv run ruff check src/ tests/
 
 # mypy 타입 체크
 uv run mypy src/

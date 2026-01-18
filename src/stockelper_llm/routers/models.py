@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     user_id: int = Field(description="실행 ID", default=1)
     thread_id: str = Field(description="스레드 ID", default="test_thread_id")
-    message: str = Field(description="채팅 메시지", default="삼성전자에 대한 투자전략을 추천해줘")
+    message: str = Field(
+        description="채팅 메시지", default="삼성전자에 대한 투자전략을 추천해줘"
+    )
     human_feedback: Optional[bool] = Field(description="사용자 피드백", default=None)
 
 
@@ -33,4 +35,3 @@ class FinalResponse(BaseModel):
         default=None,
     )
     error: Optional[str] = Field(description="에러 메시지", default=None)
-

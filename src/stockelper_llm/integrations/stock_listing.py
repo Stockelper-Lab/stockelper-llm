@@ -4,7 +4,6 @@ import difflib
 import os
 from typing import Optional
 
-
 _STOCK_LISTING_CACHE: Optional[dict[str, str]] = None
 
 
@@ -57,7 +56,11 @@ def _load_stock_listing_from_kis_master() -> dict[str, str]:
         "https://new.real.download.dws.co.kr/common/master/konex_code.mst.zip",
     ]
     raw_urls = (os.getenv("KIS_STOCK_MASTER_URLS") or "").strip()
-    urls = [u.strip() for u in raw_urls.split(",") if u.strip()] if raw_urls else default_urls
+    urls = (
+        [u.strip() for u in raw_urls.split(",") if u.strip()]
+        if raw_urls
+        else default_urls
+    )
 
     headers = {
         "User-Agent": os.getenv(
@@ -73,7 +76,9 @@ def _load_stock_listing_from_kis_master() -> dict[str, str]:
             resp = requests.get(url, headers=headers, timeout=timeout_s)
             resp.raise_for_status()
             with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                mst_name = next((n for n in zf.namelist() if n.lower().endswith(".mst")), None)
+                mst_name = next(
+                    (n for n in zf.namelist() if n.lower().endswith(".mst")), None
+                )
                 if not mst_name:
                     raise ValueError("zip 내부에 .mst 파일이 없습니다.")
                 mst_bytes = zf.read(mst_name)
@@ -119,4 +124,3 @@ def find_similar_companies(company_name: str, top_n: int = 10) -> dict[str, str]
     top_companies = similarities[:top_n]
 
     return {name: listing[name] for name, _ in top_companies}
-

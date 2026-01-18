@@ -71,4 +71,3 @@ class ToolErrorMiddleware(AgentMiddleware):
                 ),
                 tool_call_id=self._tool_call_id(request),
             )
-

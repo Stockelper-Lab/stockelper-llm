@@ -7,4 +7,3 @@ API I/O는 레거시와 동일하게 `/stock/chat` SSE 스트리밍을 제공합
 __all__ = ["__version__"]
 
 __version__ = "0.2.0"
-

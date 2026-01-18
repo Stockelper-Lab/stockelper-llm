@@ -51,4 +51,3 @@ def to_jsonable(obj: Any) -> Any:
         return [to_jsonable(v) for v in obj]
 
     return str(obj)
-

@@ -10,7 +10,6 @@ dotenv.load_dotenv(override=True)
 
 from stockelper_llm.webapp import app  # noqa: E402
 
-
 DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes"}
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "21009"))
@@ -52,4 +51,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Error starting server: {e}")
         sys.exit(1)
-

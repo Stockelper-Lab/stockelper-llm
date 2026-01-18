@@ -64,7 +64,7 @@ dev = [
     "pytest-asyncio",
     "black",
     "isort",
-    "flake8",
+    "ruff",
     "mypy",
 ]
 
@@ -80,13 +80,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/stockelper_llm"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "black>=23.0.0",
     "isort>=5.12.0",
-    "flake8>=6.0.0",
+    "ruff>=0.12.10",
     "mypy>=1.0.0",
 ]
 
@@ -104,6 +104,7 @@ extend-exclude = '''
   | \.tox
   | \.venv
   | build
+  | legacy
   | dist
 )/
 '''
@@ -112,9 +113,18 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
+skip = ["legacy"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = ["legacy"]
 
 [tool.mypy]
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

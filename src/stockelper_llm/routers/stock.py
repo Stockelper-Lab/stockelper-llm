@@ -5,17 +5,19 @@ import os
 import re
 import traceback
 
-import httpx
 from fastapi import APIRouter, status
 from fastapi.responses import StreamingResponse
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
+from stockelper_llm.agents.backtesting_request_agent import request_backtesting_job
+from stockelper_llm.agents.portfolio_request_agent import (
+    request_portfolio_recommendations,
+)
 from stockelper_llm.core.db_urls import to_async_sqlalchemy_url, to_postgresql_conninfo
 from stockelper_llm.core.langchain_compat import iter_stream_tokens, message_to_text
 from stockelper_llm.multi_agent import get_multi_agent
 from stockelper_llm.routers.models import ChatRequest, FinalResponse, StreamingStatus
-from stockelper_llm.agents.backtesting_request_agent import request_backtesting_job
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +62,9 @@ def _is_portfolio_recommendation_request(text: str) -> bool:
         return True
     if "자산" in t and ("배분" in t or "분배" in t):
         return True
-    if "포트폴리오" in t and any(k in t for k in ("추천", "구성", "배분", "분배", "리밸런")):
+    if "포트폴리오" in t and any(
+        k in t for k in ("추천", "구성", "배분", "분배", "리밸런")
+    ):
         return True
     return False
 
@@ -70,41 +74,32 @@ def _is_backtest_request(text: str) -> bool:
 
 
 async def generate_simple_sse(message: str):
-    final_response = FinalResponse(type="final", message=message, subgraph={}, trading_action=None)
+    final_response = FinalResponse(
+        type="final", message=message, subgraph={}, trading_action=None
+    )
     for token in iter_stream_tokens(message):
-        yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
+        yield f'data: {{"type": "delta", "token": {json.dumps(token, ensure_ascii=False)} }}\n\n'
     yield f"data: {json.dumps(final_response.model_dump(), ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"
 
 
-async def _trigger_portfolio_recommendations(user_id: int, portfolio_size: int | None = None) -> None:
-    base = _PORTFOLIO_SERVICE_URL.rstrip("/")
-    if not base:
-        logger.warning("STOCKELPER_PORTFOLIO_URL is not set; skip portfolio trigger")
-        return
-
-    timeout_s = float(os.getenv("PORTFOLIO_REQUESTS_TIMEOUT", "") or os.getenv("REQUESTS_TIMEOUT", "300") or 300)
+async def _trigger_portfolio_recommendations(user_id: int, user_text: str) -> None:
     try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
-            payload = {"user_id": user_id}
-            if portfolio_size is not None:
-                payload["portfolio_size"] = portfolio_size
-            resp = await client.post(f"{base}/portfolio/recommendations", json=payload)
-            if resp.status_code >= 400:
-                try:
-                    detail = resp.json().get("detail")
-                except Exception:
-                    detail = resp.text
-                raise RuntimeError(f"portfolio API error ({resp.status_code}): {detail}")
-        logger.info("Triggered portfolio recommendations: user_id=%s, portfolio_size=%s", user_id, portfolio_size)
+        # 에이전트가 user_text를 기반으로 파라미터를 생성한 뒤,
+        # portfolio 서버로 `/portfolio/recommendations` 요청을 보냅니다.
+        await request_portfolio_recommendations(user_id=user_id, user_text=user_text)
     except Exception:
-        logger.exception("Failed to trigger portfolio recommendations: user_id=%s", user_id)
+        logger.exception(
+            "Failed to trigger portfolio recommendations: user_id=%s", user_id
+        )
 
 
 async def generate_sse_response(multi_agent, input_state, user_id: int, thread_id: str):
     try:
         if not CHECKPOINT_DATABASE_URI:
-            raise RuntimeError("CHECKPOINT_DATABASE_URI 또는 DATABASE_URL/ASYNC_DATABASE_URL 이 설정되어 있지 않습니다.")
+            raise RuntimeError(
+                "CHECKPOINT_DATABASE_URI 또는 DATABASE_URL/ASYNC_DATABASE_URL 이 설정되어 있지 않습니다."
+            )
 
         def _is_assistant_message(msg: object) -> bool:
             if msg is None:
@@ -117,7 +112,9 @@ async def generate_sse_response(multi_agent, input_state, user_id: int, thread_i
 
         last_emitted_text: str = ""
 
-        async with AsyncConnectionPool(conninfo=CHECKPOINT_DATABASE_URI, kwargs={"autocommit": True}) as pool:
+        async with AsyncConnectionPool(
+            conninfo=CHECKPOINT_DATABASE_URI, kwargs={"autocommit": True}
+        ) as pool:
             checkpointer = AsyncPostgresSaver(pool)
             await checkpointer.setup()
 
@@ -150,12 +147,16 @@ async def generate_sse_response(multi_agent, input_state, user_id: int, thread_i
                         )
                         yield f"data: {json.dumps(streaming_response.model_dump(), ensure_ascii=False)}\n\n"
                 elif response_type == "values":
-                    last_msg = response.get("messages", [])[-1] if response.get("messages") else None
+                    last_msg = (
+                        response.get("messages", [])[-1]
+                        if response.get("messages")
+                        else None
+                    )
                     if _is_assistant_message(last_msg):
                         message_text = message_to_text(last_msg)
                         if message_text and message_text != last_emitted_text:
                             for token in iter_stream_tokens(message_text):
-                                yield f"data: {{\"type\": \"delta\", \"token\": {json.dumps(token, ensure_ascii=False)} }}\n\n"
+                                yield f'data: {{"type": "delta", "token": {json.dumps(token, ensure_ascii=False)} }}\n\n'
                             last_emitted_text = message_text
 
                         final_response = FinalResponse(
@@ -184,16 +185,22 @@ async def generate_sse_response(multi_agent, input_state, user_id: int, thread_i
 
 @router.post("/chat", status_code=status.HTTP_200_OK)
 async def stock_chat(request: ChatRequest) -> StreamingResponse:
-    async_db_url = to_async_sqlalchemy_url(os.getenv("ASYNC_DATABASE_URL") or os.getenv("DATABASE_URL"))
+    async_db_url = to_async_sqlalchemy_url(
+        os.getenv("ASYNC_DATABASE_URL") or os.getenv("DATABASE_URL")
+    )
     if not async_db_url:
-        raise RuntimeError("ASYNC_DATABASE_URL 또는 DATABASE_URL 이 설정되어 있지 않습니다.")
+        raise RuntimeError(
+            "ASYNC_DATABASE_URL 또는 DATABASE_URL 이 설정되어 있지 않습니다."
+        )
 
     user_id = request.user_id
     thread_id = request.thread_id
     query = request.message
     human_feedback = request.human_feedback
 
-    logger.info("Received query: user_id=%s thread_id=%s query=%s", user_id, thread_id, query)
+    logger.info(
+        "Received query: user_id=%s thread_id=%s query=%s", user_id, thread_id, query
+    )
 
     if human_feedback is None:
         if _is_portfolio_recommendation_request(query):
@@ -222,7 +229,9 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
                         },
                     )
 
-                asyncio.create_task(_trigger_portfolio_recommendations(user_id, portfolio_size=portfolio_size))
+                asyncio.create_task(
+                    _trigger_portfolio_recommendations(user_id, user_text=query)
+                )
                 guide = "포트폴리오 추천을 생성 중입니다.\n"
                 if portfolio_size is not None:
                     guide += f"(요청 개수: {portfolio_size}개)\n"
@@ -265,6 +274,26 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
                 # - 내부에서 LLM(structured output)로 parameters를 만들고,
                 # - backtesting 서버에 /api/backtesting/execute 요청을 보냅니다.
                 data = await request_backtesting_job(user_id=user_id, user_text=query)
+                # 플래너가 "추가 정보 필요/거부"를 반환한 경우: job 생성 없이 사용자에게 안내
+                if isinstance(data, dict) and data.get("status") in {
+                    "needs_clarification",
+                    "denied",
+                }:
+                    msg = (data.get("message") or "").strip() or (
+                        "백테스팅을 위해 추가 정보가 필요합니다.\n"
+                        "예) '삼성전자(005930) 2023년 백테스트'"
+                    )
+                    return StreamingResponse(
+                        generate_simple_sse(msg),
+                        media_type="text/event-stream; charset=utf-8",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "Content-Type": "text/event-stream; charset=utf-8",
+                            "X-Accel-Buffering": "no",
+                        },
+                    )
+
                 job_id = data.get("job_id") or data.get("jobId")
             except Exception:
                 msg = (
@@ -335,4 +364,3 @@ async def stock_chat(request: ChatRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
-

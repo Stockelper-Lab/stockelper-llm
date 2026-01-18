@@ -1,3 +1,4 @@
+# isort: skip_file
 import os
 
 import dotenv
@@ -7,10 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 # .env 환경변수를 항상 로딩(uvicorn으로 직접 실행되는 경우도 커버)
 dotenv.load_dotenv(override=True)
 
-from stockelper_llm.routers.base import router as base_router
-from stockelper_llm.routers.backtesting import router as backtesting_router
-from stockelper_llm.routers.stock import router as stock_router
-
+from stockelper_llm.routers.backtesting import (  # noqa: E402
+    router as backtesting_router,
+)
+from stockelper_llm.routers.base import router as base_router  # noqa: E402
+from stockelper_llm.routers.stock import router as stock_router  # noqa: E402
 
 DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes"}
 
@@ -28,4 +30,3 @@ app.add_middleware(
 app.include_router(base_router)
 app.include_router(backtesting_router)
 app.include_router(stock_router)
-

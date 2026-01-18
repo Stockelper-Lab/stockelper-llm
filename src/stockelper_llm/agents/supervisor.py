@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Annotated, List, Optional
+from typing import Annotated, List, Optional
 
 from langchain.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -26,17 +26,23 @@ from stockelper_llm.integrations.neo4j_subgraph import (
     get_subgraph_by_company_name,
     get_subgraph_by_stock_code,
 )
-from stockelper_llm.integrations.stock_listing import find_similar_companies, lookup_stock_code
+from stockelper_llm.integrations.stock_listing import (
+    find_similar_companies,
+    lookup_stock_code,
+)
 
 logger = logging.getLogger(__name__)
 
 
 _PRICE_REQUEST_PAT = re.compile(r"(주가|가격|현재가|시세|주식\s*가격)", re.IGNORECASE)
-_NEWS_REQUEST_PAT = re.compile(r"(뉴스|최신|최근\s*소식|소식|이슈|기사|호재|악재)", re.IGNORECASE)
+_NEWS_REQUEST_PAT = re.compile(
+    r"(뉴스|최신|최근\s*소식|소식|이슈|기사|호재|악재)", re.IGNORECASE
+)
 
 
 def _is_price_request(text: str) -> bool:
     return bool(_PRICE_REQUEST_PAT.search(text or ""))
+
 
 def _is_news_request(text: str) -> bool:
     return bool(_NEWS_REQUEST_PAT.search(text or ""))
@@ -196,7 +202,9 @@ def _add_messages(existing: list, update: list):
 class State:
     messages: Annotated[list, _add_messages] = field(default_factory=list)
     agent_messages: list = field(default_factory=list)
-    agent_results: Annotated[list, _truncate_agent_results] = field(default_factory=list)
+    agent_results: Annotated[list, _truncate_agent_results] = field(
+        default_factory=list
+    )
     execute_agent_count: int = field(default=0)
     trading_action: dict = field(default_factory=dict)
     stock_name: str = field(default="None")
@@ -226,7 +234,10 @@ class SupervisorAgent:
         self.llm_with_stock_name = self.llm.with_structured_output(StockName)
         self.llm_with_stock_code = self.llm.with_structured_output(StockCode)
 
-        self.agents_by_name = {getattr(agent, "name", None) or getattr(agent, "graph", agent).name: agent for agent in agents}
+        self.agents_by_name = {
+            getattr(agent, "name", None) or getattr(agent, "graph", agent).name: agent
+            for agent in agents
+        }
 
         wf = StateGraph(State)
         wf.add_node("supervisor", self.supervisor)
@@ -241,7 +252,11 @@ class SupervisorAgent:
         writer = get_stream_writer()
         writer({"step": "supervisor", "status": "start"})
 
-        if state.agent_results and state.execute_agent_count > 0 and state.agent_results[-1].get("target") == "InvestmentStrategyAgent":
+        if (
+            state.agent_results
+            and state.execute_agent_count > 0
+            and state.agent_results[-1].get("target") == "InvestmentStrategyAgent"
+        ):
             update, goto = await self.trading(state, config)
         else:
             update, goto = await self.routing(state, config)
@@ -268,7 +283,9 @@ class SupervisorAgent:
             if state.stock_code != "None":
                 content += f"\n<stock_code>\n{state.stock_code}\n</stock_code>\n"
             if state.agent_results:
-                agent_results_str = json.dumps(state.agent_results, indent=2, ensure_ascii=False)
+                agent_results_str = json.dumps(
+                    state.agent_results, indent=2, ensure_ascii=False
+                )
                 content += f"\n<agent_analysis_result>\n{agent_results_str}\n</agent_analysis_result>\n"
 
             input_data = {"messages": [HumanMessage(content=content)]}
@@ -295,13 +312,17 @@ class SupervisorAgent:
         extracted_subgraph: dict = {}
 
         for router, result in results:
-            last_msg = result.get("messages", [])[-1] if result.get("messages") else None
+            last_msg = (
+                result.get("messages", [])[-1] if result.get("messages") else None
+            )
             result_text = message_to_text(last_msg)
             agent_results.append(router | {"result": result_text})
 
             # GraphRAGAgent 결과에서 subgraph 추출
             if router.get("target") == "GraphRAGAgent" and result_text:
-                extracted = self._extract_subgraph_from_agent_result(result, result_text)
+                extracted = self._extract_subgraph_from_agent_result(
+                    result, result_text
+                )
                 if extracted:
                     extracted_subgraph = extracted
 
@@ -321,14 +342,16 @@ class SupervisorAgent:
         }
         return Command(update=update, goto="supervisor")
 
-    def _extract_subgraph_from_agent_result(self, result: dict, result_text: str) -> dict | None:
+    def _extract_subgraph_from_agent_result(
+        self, result: dict, result_text: str
+    ) -> dict | None:
         """GraphRAGAgent 결과에서 subgraph를 추출합니다.
 
         1. 메시지에서 <subgraph>...</subgraph> 태그 파싱
         2. tool_calls 결과에서 subgraph 추출
         """
         # 방법 1: 메시지에서 subgraph JSON 태그 파싱
-        subgraph_match = re.search(r'<subgraph>([\s\S]*?)</subgraph>', result_text)
+        subgraph_match = re.search(r"<subgraph>([\s\S]*?)</subgraph>", result_text)
         if subgraph_match:
             try:
                 return json.loads(subgraph_match.group(1))
@@ -362,13 +385,19 @@ class SupervisorAgent:
 
         if human_check:
             user_id = config.get("configurable", {}).get("user_id", 1)
-            user_info = await get_user_kis_context(self.async_engine, user_id, require=False)
+            user_info = await get_user_kis_context(
+                self.async_engine, user_id, require=False
+            )
             if user_info:
                 kwargs = state.trading_action | user_info
                 trading_result = place_order(**kwargs)
 
-                if isinstance(trading_result, str) and is_kis_token_expired_message(trading_result):
-                    user_info["kis_access_token"] = await refresh_user_kis_access_token(self.async_engine, user_id, user_info)
+                if isinstance(trading_result, str) and is_kis_token_expired_message(
+                    trading_result
+                ):
+                    user_info["kis_access_token"] = await refresh_user_kis_access_token(
+                        self.async_engine, user_id, user_info
+                    )
                     kwargs["kis_access_token"] = user_info["kis_access_token"]
                     trading_result = place_order(**kwargs)
             else:
@@ -415,13 +444,19 @@ class SupervisorAgent:
                 candidates = find_similar_companies(company_name=stock_name, top_n=10)
                 if candidates:
                     resp2 = await self.llm_with_stock_code.ainvoke(
-                        [HumanMessage(content=STOCK_CODE_USER_TEMPLATE.format(stock_name=stock_name, stock_codes=candidates))],
+                        [
+                            HumanMessage(
+                                content=STOCK_CODE_USER_TEMPLATE.format(
+                                    stock_name=stock_name, stock_codes=candidates
+                                )
+                            )
+                        ],
                     )
                     stock_code = resp2.stock_code
                 else:
                     fallback_prompt = (
                         "Please return the 6-digit KRX stock code for the given Stock Name. "
-                        "If unknown, return \"None\".\n\n"
+                        'If unknown, return "None".\n\n'
                         "<Stock_Name>\n"
                         f"{stock_name}\n"
                         "</Stock_Name>\n"
@@ -431,13 +466,21 @@ class SupervisorAgent:
                     )
                     stock_code = resp2.stock_code
 
-            if not (isinstance(stock_code, str) and stock_code.isdigit() and len(stock_code) == 6):
+            if not (
+                isinstance(stock_code, str)
+                and stock_code.isdigit()
+                and len(stock_code) == 6
+            ):
                 stock_code = "None"
 
             if include_subgraph:
                 try:
                     # NOTE: Neo4j 드라이버는 sync이므로 event-loop 블로킹을 피하기 위해 thread로 실행합니다.
-                    if isinstance(stock_code, str) and stock_code.isdigit() and len(stock_code) == 6:
+                    if (
+                        isinstance(stock_code, str)
+                        and stock_code.isdigit()
+                        and len(stock_code) == 6
+                    ):
                         subgraph = await asyncio.to_thread(
                             get_subgraph_by_stock_code,
                             stock_code,
@@ -462,7 +505,11 @@ class SupervisorAgent:
                 except Exception:
                     subgraph = "None"
 
-        return {"stock_name": stock_name, "stock_code": stock_code, "subgraph": subgraph}
+        return {
+            "stock_name": stock_name,
+            "stock_code": stock_code,
+            "subgraph": subgraph,
+        }
 
     async def trading(self, state: State, config: RunnableConfig):
         result = state.agent_results[-1].get("result", "")
@@ -500,7 +547,11 @@ class SupervisorAgent:
         return update, "__end__"
 
     async def routing(self, state: State, config: RunnableConfig):
-        agent_results_str = json.dumps(state.agent_results, indent=2, ensure_ascii=False) if state.agent_results else "[]"
+        agent_results_str = (
+            json.dumps(state.agent_results, indent=2, ensure_ascii=False)
+            if state.agent_results
+            else "[]"
+        )
 
         user_text = message_to_text(state.messages[-1]) if state.messages else ""
 
@@ -537,14 +588,20 @@ class SupervisorAgent:
             )
         )
 
-        messages = [SystemMessage(content=SYSTEM_TEMPLATE)] + state.messages[:-1] + [human_message]
+        messages = (
+            [SystemMessage(content=SYSTEM_TEMPLATE)]
+            + state.messages[:-1]
+            + [human_message]
+        )
 
         stock_info = {"subgraph": "None", "stock_name": "None", "stock_code": "None"}
         stock_task = None
         if state.execute_agent_count == 0 and user_text:
             stock_task = asyncio.create_task(
                 # 요구사항: 종목이 식별되면(간단 답변/그래프 미사용 답변 포함) 항상 subgraph를 반환
-                self.get_stock_name_code_by_query_subgraph(user_text, include_subgraph=True)
+                self.get_stock_name_code_by_query_subgraph(
+                    user_text, include_subgraph=True
+                )
             )
 
         try:
@@ -557,10 +614,26 @@ class SupervisorAgent:
                 try:
                     stock_info = await stock_task
                 except Exception:
-                    stock_info = {"subgraph": "None", "stock_name": "None", "stock_code": "None"}
-            subgraph = state.subgraph if stock_info["subgraph"] == "None" else stock_info["subgraph"]
-            stock_name = state.stock_name if stock_info["stock_name"] == "None" else stock_info["stock_name"]
-            stock_code = state.stock_code if stock_info["stock_code"] == "None" else stock_info["stock_code"]
+                    stock_info = {
+                        "subgraph": "None",
+                        "stock_name": "None",
+                        "stock_code": "None",
+                    }
+            subgraph = (
+                state.subgraph
+                if stock_info["subgraph"] == "None"
+                else stock_info["subgraph"]
+            )
+            stock_name = (
+                state.stock_name
+                if stock_info["stock_name"] == "None"
+                else stock_info["stock_name"]
+            )
+            stock_code = (
+                state.stock_code
+                if stock_info["stock_code"] == "None"
+                else stock_info["stock_code"]
+            )
             update = State(
                 messages=[
                     AIMessage(
@@ -582,11 +655,27 @@ class SupervisorAgent:
             try:
                 stock_info = await stock_task
             except Exception:
-                stock_info = {"subgraph": "None", "stock_name": "None", "stock_code": "None"}
+                stock_info = {
+                    "subgraph": "None",
+                    "stock_name": "None",
+                    "stock_code": "None",
+                }
 
-        subgraph = state.subgraph if stock_info["subgraph"] == "None" else stock_info["subgraph"]
-        stock_name = state.stock_name if stock_info["stock_name"] == "None" else stock_info["stock_name"]
-        stock_code = state.stock_code if stock_info["stock_code"] == "None" else stock_info["stock_code"]
+        subgraph = (
+            state.subgraph
+            if stock_info["subgraph"] == "None"
+            else stock_info["subgraph"]
+        )
+        stock_name = (
+            state.stock_name
+            if stock_info["stock_name"] == "None"
+            else stock_info["stock_name"]
+        )
+        stock_code = (
+            state.stock_code
+            if stock_info["stock_code"] == "None"
+            else stock_info["stock_code"]
+        )
 
         if stock_code != "None" and _is_price_request(user_text):
             router_info = RouterList(
@@ -622,7 +711,9 @@ class SupervisorAgent:
             )
             return update, "__end__"
 
-        if state.execute_agent_count >= config.get("configurable", {}).get("max_execute_agent_count", 3):
+        if state.execute_agent_count >= config.get("configurable", {}).get(
+            "max_execute_agent_count", 3
+        ):
             update = State(
                 messages=[AIMessage(content="더 이상 실행할 수 없습니다.")],
                 agent_results=state.agent_results,
@@ -639,4 +730,3 @@ class SupervisorAgent:
             "stock_code": stock_code,
         }
         return update, "execute_agent"
-

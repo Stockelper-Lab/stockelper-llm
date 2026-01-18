@@ -20,7 +20,9 @@ class ProgressMiddleware(AgentMiddleware):
     def __init__(self, agent_step_name: str):
         self.agent_step_name = agent_step_name
 
-    def before_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    def before_agent(
+        self, state: AgentState, runtime: Runtime
+    ) -> dict[str, Any] | None:
         try:
             runtime.stream_writer({"step": self.agent_step_name, "status": "start"})
         except Exception:
@@ -40,10 +42,14 @@ class ProgressMiddleware(AgentMiddleware):
                 pass
         return None
 
-    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    async def abefore_agent(
+        self, state: AgentState, runtime: Runtime
+    ) -> dict[str, Any] | None:
         return self.before_agent(state, runtime)
 
-    async def aafter_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    async def aafter_agent(
+        self, state: AgentState, runtime: Runtime
+    ) -> dict[str, Any] | None:
         return self.after_agent(state, runtime)
 
     @staticmethod
@@ -117,4 +123,3 @@ class ProgressMiddleware(AgentMiddleware):
 def make_progress_middleware(agent_step_name: str):
     """progress 이벤트를 LangGraph custom stream으로 방출하는 미들웨어 팩토리."""
     return [ProgressMiddleware(agent_step_name)]
-

@@ -3,13 +3,17 @@ from __future__ import annotations
 import logging
 import os
 import re
+from datetime import date, timedelta
 from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, field_validator
 
-from stockelper_llm.integrations.stock_listing import find_similar_companies, lookup_stock_code
+from stockelper_llm.integrations.stock_listing import (
+    find_similar_companies,
+    lookup_stock_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,52 @@ _YEAR_PAT = re.compile(r"(20\d{2})\s*년")
 _MONEY_EOK_PAT = re.compile(r"(\d+(?:\.\d+)?)\s*억(?:원)?")
 _MONEY_MAN_PAT = re.compile(r"(\d+(?:\.\d+)?)\s*만(?:원)?")
 _MONEY_WON_PAT = re.compile(r"(\d{1,3}(?:,\d{3})+|\d+)\s*원")
+_CORP_TOKEN_PAT = re.compile(r"[가-힣A-Za-z]{2,}")
+
+_CORP_TOKEN_STOPWORDS = {
+    # backtest/general
+    "백테스트",
+    "백테스팅",
+    "backtest",
+    "backtesting",
+    "테스트",
+    "검증",
+    "전략",
+    # market/universe
+    "코스피",
+    "코스닥",
+    "코넥스",
+    "국내",
+    "한국",
+    "주식",
+    "종목",
+    "전체",
+    "전종목",
+    "유니버스",
+    # actions/filters
+    "매수",
+    "매도",
+    "보유",
+    "리밸런",
+    "리밸런싱",
+    "상위",
+    "하위",
+    "기준",
+    "비교",
+    # time
+    "기간",
+    "연도",
+    "년",
+    "월",
+    "일",
+    "최근",
+    # misc
+    "추천",
+    "구성",
+    "해줘",
+    "해주세요",
+    "부탁",
+}
 
 
 def _model_name(default: str = "gpt-5.1") -> str:
@@ -45,9 +95,7 @@ class IndicatorCondition(BaseModel):
     report_type: str = Field(
         description="공시 유형 (예: '유상증자 결정', '감자 결정', '회사합병 결정')"
     )
-    idc_nm: str = Field(
-        description="지표명 (예: '희석률', '감자비율', '합병비율')"
-    )
+    idc_nm: str = Field(description="지표명 (예: '희석률', '감자비율', '합병비율')")
     action: Literal["BUY", "SELL"] = Field(
         description="조건 만족 시 행동 (BUY: 매수, SELL: 매도)"
     )
@@ -73,21 +121,28 @@ class BacktestParametersDraft(BaseModel):
     """
 
     # 기간
-    start_date: Optional[str] = Field(default=None, description="YYYY-MM-DD 형식의 시작일")
-    end_date: Optional[str] = Field(default=None, description="YYYY-MM-DD 형식의 종료일")
+    start_date: Optional[str] = Field(
+        default=None, description="YYYY-MM-DD 형식의 시작일"
+    )
+    end_date: Optional[str] = Field(
+        default=None, description="YYYY-MM-DD 형식의 종료일"
+    )
 
     # 자본/리밸런싱/정렬
     initial_cash: Optional[int] = Field(
-        default=None,
-        description="초기 투자금액 (원 단위 정수, 예: 1억=100000000)"
+        default=None, description="초기 투자금액 (원 단위 정수, 예: 1억=100000000)"
     )
-    rebalancing_period: Optional[Literal["daily", "weekly", "monthly", "quarterly"]] = Field(
-        default=None,
-        description="리밸런싱 주기 (daily: 매일, weekly: 매주, monthly: 매월, quarterly: 분기)"
+    rebalancing_period: Optional[Literal["daily", "weekly", "monthly", "quarterly"]] = (
+        Field(
+            default=None,
+            description="리밸런싱 주기 (daily: 매일, weekly: 매주, monthly: 매월, quarterly: 분기)",
+        )
     )
-    sort_by: Optional[Literal["momentum", "market_cap", "event_type", "disclosure"]] = Field(
-        default=None,
-        description="정렬 기준 (momentum: 모멘텀, market_cap: 시가총액, event_type: 이벤트, disclosure: 공시)"
+    sort_by: Optional[Literal["momentum", "market_cap", "event_type", "disclosure"]] = (
+        Field(
+            default=None,
+            description="정렬 기준 (momentum: 모멘텀, market_cap: 시가총액, event_type: 이벤트, disclosure: 공시)",
+        )
     )
 
     # 대상
@@ -108,8 +163,7 @@ class BacktestParametersDraft(BaseModel):
 
     # 필터링
     filter_type: Optional[Literal["top", "bottom", "value"]] = Field(
-        default=None,
-        description="필터 타입 (top: 상위, bottom: 하위, value: 값 기준)"
+        default=None, description="필터 타입 (top: 상위, bottom: 하위, value: 값 기준)"
     )
     filter_percent: Optional[float] = Field(
         default=None, ge=0, le=100, description="상위/하위 % (예: 20 = 상위 20%)"
@@ -120,13 +174,13 @@ class BacktestParametersDraft(BaseModel):
     # 이후 처리에서 True로 강제 설정합니다.
     use_dart_disclosure: Optional[bool] = Field(
         default=None,
-        description="DART 공시 데이터 사용 여부 (명시하지 않으면 기본 True)"
+        description="DART 공시 데이터 사용 여부 (명시하지 않으면 기본 True)",
     )
 
     # 이벤트별 지표 조건
     event_indicator_conditions: Optional[List[IndicatorCondition]] = Field(
         default=None,
-        description="이벤트별 지표 조건 설정 리스트 (공시 지표가 특정 조건을 만족할 때 매수/매도)"
+        description="이벤트별 지표 조건 설정 리스트 (공시 지표가 특정 조건을 만족할 때 매수/매도)",
     )
 
     @field_validator("start_date", "end_date")
@@ -169,6 +223,49 @@ class BacktestParametersDraft(BaseModel):
         return out or None
 
 
+def _extract_candidate_corp_names(text: str, *, max_candidates: int = 5) -> List[str]:
+    """OPENAI_API_KEY가 없거나 LLM 파싱이 불완전할 때, 회사명 후보를 보수적으로 추출."""
+    t = (text or "").strip()
+    if not t:
+        return []
+
+    # 기본: 한글/영문 2글자 이상 토큰
+    raw_tokens = [x.strip() for x in _CORP_TOKEN_PAT.findall(t) if x and x.strip()]
+    if not raw_tokens:
+        return []
+
+    stop = {s.lower() for s in _CORP_TOKEN_STOPWORDS}
+    tokens: List[str] = []
+    for tok in raw_tokens:
+        if tok.lower() in stop:
+            continue
+        if tok.isdigit():
+            continue
+        tokens.append(tok)
+
+    # 중복 제거 + 길이 우선(긴 토큰이 보통 회사명에 가까움)
+    uniq: List[str] = []
+    for tok in tokens:
+        if tok not in uniq:
+            uniq.append(tok)
+    uniq.sort(key=len, reverse=True)
+    return uniq[:max_candidates]
+
+
+def _parse_iso_date(s: str) -> Optional[date]:
+    try:
+        return date.fromisoformat((s or "").strip())
+    except Exception:
+        return None
+
+
+def _to_bool_env(name: str, default: bool = False) -> bool:
+    raw = (os.getenv(name, "") or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
 def _build_params_rule_based(text: str) -> Dict[str, Any]:
     """백테스트 초기 입력값을 룰 기반으로 추정(LLM 실패/미설정 시 fallback)."""
 
@@ -185,6 +282,11 @@ def _build_params_rule_based(text: str) -> Dict[str, Any]:
         params["target_symbols"] = codes
         params["max_portfolio_size"] = len(codes)
         params["max_positions"] = max(1, min(10, len(codes)))
+    else:
+        # 1-b) 종목코드가 없으면 회사명 후보를 추출(보수적으로)
+        corp_names = _extract_candidate_corp_names(t, max_candidates=5)
+        if corp_names:
+            params["target_corp_names"] = corp_names
 
     # 2) 기간
     ymd = _DATE_YMD_PAT.findall(t)
@@ -290,7 +392,9 @@ def _build_params_rule_based(text: str) -> Dict[str, Any]:
     return params
 
 
-def _convert_indicator_conditions(conditions: List[IndicatorCondition]) -> List[Dict[str, Any]]:
+def _convert_indicator_conditions(
+    conditions: List[IndicatorCondition],
+) -> List[Dict[str, Any]]:
     """IndicatorCondition Pydantic 모델을 BacktestInput 형식의 dict로 변환."""
     result: List[Dict[str, Any]] = []
     for cond in conditions:
@@ -346,12 +450,272 @@ def _resolve_corp_names_to_symbols(corp_names: List[str]) -> List[str]:
             symbols.append(first_code)
             logger.info(
                 "종목명 → 종목코드 변환 (유사 매칭): %s → %s (원래 요청: %s)",
-                first_name, first_code, name
+                first_name,
+                first_code,
+                name,
             )
         else:
             logger.warning("종목명 → 종목코드 변환 실패 (매칭 없음): %s", name)
 
     return symbols
+
+
+class BacktestPlanningResult(BaseModel):
+    """백테스트 요청 파라미터 계획 결과.
+
+    - ok: backtesting 서버에 요청할 수 있는 형태로 parameters가 준비됨
+    - needs_clarification: 사용자에게 추가 정보(종목/기간 등)가 필요
+    - denied: 안전/정책상 실행 불가(예: 과도한 범위)
+    """
+
+    status: Literal["ok", "needs_clarification", "denied"] = Field(
+        description="계획 결과 상태"
+    )
+    message: str = Field(description="사용자에게 보여줄 안내 메시지")
+    parameters: Optional[Dict[str, Any]] = Field(
+        default=None, description="backtesting 서버에 전달할 parameters"
+    )
+    assumptions: List[str] = Field(
+        default_factory=list, description="자동 보정/가정 사항(로그/디버깅용)"
+    )
+
+
+class BacktestRequestPlanner:
+    """LangChain(v1) 기반 '요청 파라미터 플래너'.
+
+    LLM은 의도/파라미터를 구조화하고, 코드는 사전검증/가드레일/보정으로 안전을 보장합니다.
+    """
+
+    def __init__(self) -> None:
+        self.default_years = int(
+            os.getenv("STOCKELPER_BACKTEST_DEFAULT_YEARS", "3") or 3
+        )
+        self.max_years = int(os.getenv("STOCKELPER_BACKTEST_MAX_YEARS", "5") or 5)
+        self.max_target_symbols = int(
+            os.getenv("STOCKELPER_BACKTEST_MAX_TARGET_SYMBOLS", "50") or 50
+        )
+        self.allow_full_universe = _to_bool_env(
+            "STOCKELPER_BACKTEST_ALLOW_FULL_UNIVERSE", default=False
+        )
+
+    async def plan(self, user_text: str) -> BacktestPlanningResult:
+        text = (user_text or "").strip()
+        if not text:
+            return BacktestPlanningResult(
+                status="needs_clarification",
+                message="백테스트 요청이 비어 있습니다. 예) '삼성전자(005930) 2023년 백테스트'",
+            )
+
+        fallback = _build_params_rule_based(text)
+        params: Dict[str, Any] = dict(fallback)
+        assumptions: List[str] = []
+
+        # 1) LLM 파싱(가능한 경우) - LangChain structured output
+        if (os.getenv("OPENAI_API_KEY") or "").strip():
+            model = _model_name()
+            llm = ChatOpenAI(model=model, temperature=0.0)
+            llm_structured = llm.with_structured_output(BacktestParametersDraft)
+
+            today = date.today().isoformat()
+            default_years = max(1, self.default_years)
+
+            system = (
+                "너는 사용자의 자연어를 한국 주식 백테스트 요청 파라미터로 변환하는 변환기다.\n"
+                "반드시 JSON 스키마에 맞춰서만 출력하고, 추측/환각을 최소화한다.\n\n"
+                "## 기본 규칙\n"
+                "- 종목코드(6자리)가 명시되지 않았으면 target_symbols는 비워두고, 회사명은 target_corp_names에 넣는다.\n"
+                "- 날짜는 YYYY-MM-DD 형식.\n"
+                f"- 사용자가 기간을 말하지 않으면, 기본 기간은 최근 {default_years}년으로 설정한다.\n"
+                f"  - 오늘 날짜는 {today}.\n"
+                "- 리밸런싱 주기는 daily/weekly/monthly/quarterly.\n"
+                "- sort_by는 momentum/market_cap/event_type/disclosure 중 하나.\n"
+                "- 사용자가 말하지 않은 값은 null로 둔다.\n\n"
+                "## 이벤트별 지표 조건 (event_indicator_conditions)\n"
+                "사용자가 공시 관련 조건을 언급하면 event_indicator_conditions를 채운다.\n"
+                "지원되는 공시 유형(report_type):\n"
+                "- 유상증자 결정, 무상증자 결정, 유무상증자 결정\n"
+                "- 감자 결정\n"
+                "- 자기주식 취득 결정, 자기주식 처분 결정\n"
+                "- 회사합병 결정, 회사분할 결정\n"
+                "- 전환사채권 발행결정, 신주인수권부사채권 발행결정\n"
+                "지원되는 지표명(idc_nm):\n"
+                "- 희석률, 감자비율, 합병비율, 분할비율, 증자비율\n\n"
+                "예시:\n"
+                "- '유상증자 희석률 30% 이하면 매수' → report_type='유상증자 결정', idc_nm='희석률', action='BUY', condition_max=0.3\n"
+                "- '감자비율 10% 이상이면 매도' → report_type='감자 결정', idc_nm='감자비율', action='SELL', condition_min=0.1\n\n"
+                "## 필터링\n"
+                "- '상위 20%' → filter_type='top', filter_percent=20\n"
+                "- '하위 10%' → filter_type='bottom', filter_percent=10"
+            )
+            user = f"사용자 입력:\n{text}"
+
+            try:
+                parsed: BacktestParametersDraft = await llm_structured.ainvoke(
+                    [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ]
+                )
+                llm_params = parsed.model_dump(exclude_none=True)
+
+                # event_indicator_conditions를 BacktestInput 형식으로 변환
+                if parsed.event_indicator_conditions:
+                    llm_params["event_indicator_conditions"] = (
+                        _convert_indicator_conditions(parsed.event_indicator_conditions)
+                    )
+
+                # 보수적 병합: LLM 결과가 비어있으면 fallback 유지
+                if llm_params:
+                    params.update(llm_params)
+            except Exception:
+                # LLM 실패 시 fallback으로 진행
+                pass
+
+        # 2) 최소 보정/기본값
+        if params.get("use_dart_disclosure") is None:
+            params["use_dart_disclosure"] = True
+
+        # 3) 회사명 → 종목코드 변환(가능하면)
+        target_symbols = params.get("target_symbols")
+        target_corp_names = params.get("target_corp_names")
+        if (
+            (not target_symbols)
+            and isinstance(target_corp_names, list)
+            and target_corp_names
+        ):
+            resolved_symbols = _resolve_corp_names_to_symbols(target_corp_names)
+            if resolved_symbols:
+                params["target_symbols"] = sorted(set(resolved_symbols))
+                assumptions.append(
+                    f"회사명 {target_corp_names}을(를) 종목코드 {resolved_symbols}(으)로 변환했습니다."
+                )
+
+        # 4) 날짜 보정/가드레일
+        start_s = (
+            params.get("start_date")
+            if isinstance(params.get("start_date"), str)
+            else None
+        )
+        end_s = (
+            params.get("end_date") if isinstance(params.get("end_date"), str) else None
+        )
+        start_d = _parse_iso_date(start_s) if start_s else None
+        end_d = _parse_iso_date(end_s) if end_s else None
+
+        today_d = date.today()
+        if end_d and end_d > today_d:
+            assumptions.append(
+                f"종료일(end_date)이 미래({end_d})라 오늘({today_d})로 보정했습니다."
+            )
+            end_d = today_d
+
+        if start_d is None and end_d is None:
+            end_d = today_d
+            start_d = end_d - timedelta(days=365 * max(1, self.default_years))
+            assumptions.append(
+                f"기간이 지정되지 않아 최근 {max(1, self.default_years)}년으로 기본 설정했습니다."
+            )
+        elif start_d is None and end_d is not None:
+            start_d = end_d - timedelta(days=365 * max(1, self.default_years))
+            assumptions.append(
+                f"시작일(start_date)이 없어 종료일 기준 최근 {max(1, self.default_years)}년으로 보정했습니다."
+            )
+        elif start_d is not None and end_d is None:
+            end_d = min(
+                today_d, start_d + timedelta(days=365 * max(1, self.default_years))
+            )
+            assumptions.append(
+                f"종료일(end_date)이 없어 시작일 기준 {max(1, self.default_years)}년 범위로 보정했습니다."
+            )
+
+        if start_d and end_d and start_d > end_d:
+            start_d, end_d = end_d, start_d
+            assumptions.append("시작일/종료일이 뒤바뀌어 자동으로 교정했습니다.")
+
+        if start_d and end_d:
+            max_days = 365 * max(1, self.max_years)
+            if (end_d - start_d).days > max_days:
+                new_start = end_d - timedelta(days=max_days)
+                assumptions.append(
+                    f"요청 기간이 너무 길어(max {self.max_years}년) 시작일을 {new_start}로 자동 축소했습니다."
+                )
+                start_d = new_start
+
+            params["start_date"] = start_d.isoformat()
+            params["end_date"] = end_d.isoformat()
+
+        # 5) 대상 종목 가드레일(기본: 대상 필수)
+        target_symbols = params.get("target_symbols")
+        syms: List[str] = []
+        if isinstance(target_symbols, list):
+            for x in target_symbols:
+                s = str(x).strip()
+                if len(s) == 6 and s.isdigit():
+                    syms.append(s)
+        syms = sorted(set(syms))
+        if syms:
+            params["target_symbols"] = syms
+        else:
+            if self.allow_full_universe:
+                # allow_full_universe라도 현재 플래너 스키마(universe/sectors)가 없어서 안전하게 질문으로 유도
+                return BacktestPlanningResult(
+                    status="needs_clarification",
+                    message=(
+                        "백테스트 대상 종목을 찾지 못했습니다.\n"
+                        "6자리 종목코드(예: 005930) 또는 회사명을 함께 입력해주세요.\n"
+                        "예) '삼성전자(005930) 최근 3년 백테스트'"
+                    ),
+                    assumptions=assumptions,
+                )
+
+            return BacktestPlanningResult(
+                status="needs_clarification",
+                message=(
+                    "백테스트 대상 종목을 찾지 못했습니다.\n"
+                    "6자리 종목코드(예: 005930) 또는 회사명을 함께 입력해주세요.\n"
+                    "예) '삼성전자(005930) 2023년 백테스트'\n"
+                    "예) 'SK하이닉스 2022~2024 백테스트'"
+                ),
+                assumptions=assumptions,
+            )
+
+        if len(syms) > self.max_target_symbols:
+            return BacktestPlanningResult(
+                status="denied",
+                message=(
+                    f"요청하신 대상 종목 수가 너무 많습니다({len(syms)}개).\n"
+                    f"현재 안전 제한은 최대 {self.max_target_symbols}개입니다. 종목 수를 줄여서 다시 요청해주세요."
+                ),
+                assumptions=assumptions,
+            )
+
+        # 6) 포트폴리오 크기 보정(단일/다중 종목 입력 시 과도한 스크리닝 방지)
+        max_portfolio_size = params.get("max_portfolio_size")
+        max_positions = params.get("max_positions")
+
+        if not isinstance(max_portfolio_size, int) or max_portfolio_size <= 0:
+            params["max_portfolio_size"] = len(syms)
+        if not isinstance(max_positions, int) or max_positions <= 0:
+            params["max_positions"] = max(1, min(10, len(syms)))
+
+        # 논리 제약
+        if params["max_positions"] > len(syms):
+            params["max_positions"] = len(syms)
+        if params["max_portfolio_size"] < params["max_positions"]:
+            params["max_portfolio_size"] = params["max_positions"]
+
+        # 7) 누락 기본값(서버 기본값을 존중하되, 명시적으로 안전한 값만 채움)
+        if not params.get("sort_by"):
+            params["sort_by"] = "disclosure"
+        if not params.get("rebalancing_period"):
+            params["rebalancing_period"] = "monthly"
+
+        return BacktestPlanningResult(
+            status="ok",
+            message="백테스트 파라미터 계획이 완료되었습니다.",
+            parameters=params,
+            assumptions=assumptions,
+        )
 
 
 async def build_backtest_parameters_from_user_text(user_text: str) -> Dict[str, Any]:
@@ -422,7 +786,13 @@ async def build_backtest_parameters_from_user_text(user_text: str) -> Dict[str, 
 
     # 필수에 가까운 값(대상/기간)이 빠진 경우 fallback로 보완
     merged = dict(llm_params)
-    for k in ("target_symbols", "target_corp_names", "start_date", "end_date", "event_indicator_conditions"):
+    for k in (
+        "target_symbols",
+        "target_corp_names",
+        "start_date",
+        "end_date",
+        "event_indicator_conditions",
+    ):
         if merged.get(k) in (None, "", [], {}):
             if k in fallback and fallback.get(k) not in (None, "", [], {}):
                 merged[k] = fallback[k]
@@ -458,13 +828,25 @@ async def request_backtesting_job(*, user_id: int, user_text: str) -> Dict[str, 
 
     base = _get_backtesting_service_url()
 
-    params = await build_backtest_parameters_from_user_text(user_text)
+    planner = BacktestRequestPlanner()
+    plan = await planner.plan(user_text)
+    if (
+        plan.status != "ok"
+        or not isinstance(plan.parameters, dict)
+        or not plan.parameters
+    ):
+        # routers/stock.py에서 message를 사용자에게 그대로 전달할 수 있도록 dict로 반환
+        return plan.model_dump(exclude_none=True)
+
+    params = plan.parameters
 
     # ============================================================
     # 종목명 → 종목코드 변환 (LLM 서버에서 처리)
     # ============================================================
     # target_corp_names가 있고 target_symbols가 없으면 변환 수행
-    target_corp_names = params.get("target_corp_names") if isinstance(params, dict) else None
+    target_corp_names = (
+        params.get("target_corp_names") if isinstance(params, dict) else None
+    )
     target_symbols = params.get("target_symbols") if isinstance(params, dict) else None
 
     if target_corp_names and isinstance(target_corp_names, list):
@@ -473,13 +855,16 @@ async def request_backtesting_job(*, user_id: int, user_text: str) -> Dict[str, 
 
         if resolved_symbols:
             # 기존 target_symbols와 병합 (중복 제거)
-            existing_symbols = target_symbols if isinstance(target_symbols, list) else []
+            existing_symbols = (
+                target_symbols if isinstance(target_symbols, list) else []
+            )
             merged_symbols = sorted(set(existing_symbols + resolved_symbols))
             params["target_symbols"] = merged_symbols
             target_symbols = merged_symbols
             logger.info(
                 "종목명 → 종목코드 변환 완료: %s → %s",
-                target_corp_names, resolved_symbols
+                target_corp_names,
+                resolved_symbols,
             )
 
         # 변환 후 target_corp_names는 제거 (백테스팅 서버에서 불필요)
@@ -488,16 +873,23 @@ async def request_backtesting_job(*, user_id: int, user_text: str) -> Dict[str, 
 
     payload: Dict[str, Any] = {
         "user_id": int(user_id),
-        "stock_symbol": (target_symbols[0] if isinstance(target_symbols, list) and target_symbols else None),
+        "stock_symbol": (
+            target_symbols[0]
+            if isinstance(target_symbols, list) and target_symbols
+            else None
+        ),
         "strategy_type": params.get("sort_by") if isinstance(params, dict) else None,
         "query": user_text,
     }
     if params:
         payload["parameters"] = params
 
-    timeout_s = float(os.getenv("BACKTESTING_REQUESTS_TIMEOUT", "") or os.getenv("REQUESTS_TIMEOUT", "30") or 30)
+    timeout_s = float(
+        os.getenv("BACKTESTING_REQUESTS_TIMEOUT", "")
+        or os.getenv("REQUESTS_TIMEOUT", "30")
+        or 30
+    )
     async with httpx.AsyncClient(timeout=timeout_s) as client:
         resp = await client.post(f"{base}/api/backtesting/execute", json=payload)
         resp.raise_for_status()
         return resp.json()
-

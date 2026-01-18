@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from routers.stock import (  # type: ignore[import-not-found]
+from stockelper_llm.routers.stock import (
     _extract_portfolio_size,
     _is_portfolio_recommendation_request,
 )
@@ -22,5 +22,3 @@ def test_is_portfolio_recommendation_request_with_count():
     q = "지금 내가 갖고 있는 종목을 기준으로 10개 종목을 추천해줘"
     assert _extract_portfolio_size(q) == 10
     assert _is_portfolio_recommendation_request(q) is True
-
-

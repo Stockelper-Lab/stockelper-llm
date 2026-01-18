@@ -4,7 +4,7 @@ import json
 import os
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import asyncpg
 import httpx
@@ -46,7 +46,9 @@ def _get_stockelper_web_dsn() -> str:
     )
     dsn = to_postgresql_conninfo(url)
     if not dsn:
-        raise RuntimeError("Missing STOCKELPER_WEB_DATABASE_URL or DATABASE_URL/ASYNC_DATABASE_URL")
+        raise RuntimeError(
+            "Missing STOCKELPER_WEB_DATABASE_URL or DATABASE_URL/ASYNC_DATABASE_URL"
+        )
     return dsn
 
 
@@ -69,7 +71,9 @@ def _analysis_model_name() -> str:
 class InterpretRequest(BaseModel):
     user_id: int = Field(description="stockelper_web.users.id")
     job_id: str = Field(description="public.backtesting.job_id")
-    force: bool = Field(default=False, description="이미 completed인 분석을 강제로 재생성")
+    force: bool = Field(
+        default=False, description="이미 completed인 분석을 강제로 재생성"
+    )
 
 
 class BacktestInterpretationJson(BaseModel):
@@ -126,7 +130,7 @@ def _render_markdown(
         pass
 
     md = []
-    md.append(f"# 백테스트 해석 리포트\n")
+    md.append("# 백테스트 해석 리포트\n")
     md.append(f"- **job_id**: `{job_id}`\n")
     if target:
         md.append(f"- **대상**: `{target}`\n")
@@ -158,7 +162,9 @@ def _render_markdown(
     return "".join(md)
 
 
-async def _update_analysis_in_progress(*, job_id: str, user_id: int, model: str) -> None:
+async def _update_analysis_in_progress(
+    *, job_id: str, user_id: int, model: str
+) -> None:
     schema = _get_schema()
     table = _get_table()
     dsn = _get_stockelper_web_dsn()
@@ -214,14 +220,18 @@ async def _update_analysis_completed(
             job_id,
             int(user_id),
             analysis_md,
-            json.dumps(analysis_json, ensure_ascii=False, default=str),  # asyncpg jsonb 호환
+            json.dumps(
+                analysis_json, ensure_ascii=False, default=str
+            ),  # asyncpg jsonb 호환
             float(elapsed_seconds),
         )
     finally:
         await conn.close()
 
 
-async def _update_analysis_failed(*, job_id: str, user_id: int, error_message: str, elapsed_seconds: float) -> None:
+async def _update_analysis_failed(
+    *, job_id: str, user_id: int, error_message: str, elapsed_seconds: float
+) -> None:
     schema = _get_schema()
     table = _get_table()
     dsn = _get_stockelper_web_dsn()
@@ -266,7 +276,9 @@ async def interpret_backtest(req: InterpretRequest):
     model = _analysis_model_name()
 
     try:
-        await _update_analysis_in_progress(job_id=req.job_id, user_id=req.user_id, model=model)
+        await _update_analysis_in_progress(
+            job_id=req.job_id, user_id=req.user_id, model=model
+        )
 
         base = _get_backtesting_service_url()
         timeout_s = float(os.getenv("BACKTEST_ANALYSIS_HTTP_TIMEOUT", "60") or 60)
@@ -380,7 +392,10 @@ async def interpret_backtest(req: InterpretRequest):
         elapsed = time.time() - t0
         try:
             await _update_analysis_failed(
-                job_id=req.job_id, user_id=req.user_id, error_message=str(e.detail), elapsed_seconds=elapsed
+                job_id=req.job_id,
+                user_id=req.user_id,
+                error_message=str(e.detail),
+                elapsed_seconds=elapsed,
             )
         except Exception:
             pass
@@ -389,7 +404,10 @@ async def interpret_backtest(req: InterpretRequest):
         elapsed = time.time() - t0
         try:
             await _update_analysis_failed(
-                job_id=req.job_id, user_id=req.user_id, error_message=str(e), elapsed_seconds=elapsed
+                job_id=req.job_id,
+                user_id=req.user_id,
+                error_message=str(e),
+                elapsed_seconds=elapsed,
             )
         except Exception:
             pass
@@ -397,4 +415,3 @@ async def interpret_backtest(req: InterpretRequest):
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"backtest interpretation failed: {e}",
         ) from e
-

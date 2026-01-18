@@ -11,9 +11,9 @@ from langchain.agents.middleware import (
     ToolCallLimitMiddleware,
     ToolRetryMiddleware,
 )
+from langchain.messages import HumanMessage, SystemMessage
 from langchain.tools import ToolRuntime, tool
 from langchain_openai import ChatOpenAI
-from langchain.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from stockelper_llm.agents.progress_middleware import make_progress_middleware
@@ -42,7 +42,9 @@ class AgentContext:
 
 
 def _model_name(default: str = "gpt-5.1") -> str:
-    return (os.getenv("STOCKELPER_LLM_MODEL") or os.getenv("STOCKELPER_MODEL") or default).strip()
+    return (
+        os.getenv("STOCKELPER_LLM_MODEL") or os.getenv("STOCKELPER_MODEL") or default
+    ).strip()
 
 
 async def _financial_knowledge_graph_analysis_impl(
@@ -58,7 +60,11 @@ async def _financial_knowledge_graph_analysis_impl(
     - 현재 온톨로지(Company/Event/Document/StockPrice/Date)에 맞춰 조회
     - FE가 기대하는 subgraph 포맷({node, relation}) 포함
     """
-    if not (os.getenv("NEO4J_URI") and os.getenv("NEO4J_USER") and os.getenv("NEO4J_PASSWORD")):
+    if not (
+        os.getenv("NEO4J_URI")
+        and os.getenv("NEO4J_USER")
+        and os.getenv("NEO4J_PASSWORD")
+    ):
         return (
             "Neo4j 설정(NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD)이 없어 지식그래프를 조회할 수 없습니다.\n"
             "관리자에게 문의해주세요."
@@ -108,7 +114,10 @@ async def _financial_knowledge_graph_analysis_impl(
         if isinstance(n, dict) and n.get("node_name") is not None
     }
 
-    company = next((n for n in nodes if isinstance(n, dict) and n.get("node_type") == "Company"), None)
+    company = next(
+        (n for n in nodes if isinstance(n, dict) and n.get("node_type") == "Company"),
+        None,
+    )
 
     # Event -> Document 연결 매핑
     ev_to_docs: dict[str, list[dict]] = {}
@@ -200,7 +209,9 @@ def build_market_analysis_agent(*, extra_tools: list[Any] | None = None):
         참고(개념): https://docs.langchain.com/oss/javascript/integrations/tools/openai#web-search-tool
         """
         if not os.getenv("OPENAI_API_KEY"):
-            return "OPENAI_API_KEY가 설정되어 있지 않아 Web Search를 사용할 수 없습니다."
+            return (
+                "OPENAI_API_KEY가 설정되어 있지 않아 Web Search를 사용할 수 없습니다."
+            )
 
         # OpenAI Responses API의 built-in web search tool을 바인딩해 최신 정보를 가져옵니다.
         # (LangChain.js에서는 tools.webSearch()로 제공되며, Python에서는 dict tool 정의를 bind_tools로 전달합니다.)
@@ -267,7 +278,9 @@ def build_fundamental_analysis_agent(*, extra_tools: list[Any] | None = None):
     extra_tools = list(extra_tools or [])
 
     @tool
-    def analyze_financial_statement(stock_name: str, runtime: ToolRuntime[AgentContext]) -> str:
+    def analyze_financial_statement(
+        stock_name: str, runtime: ToolRuntime[AgentContext]
+    ) -> str:
         """재무제표/공시 기반 기본적 분석을 수행합니다. (예시 구현)"""
         return (
             "재무제표 분석 도구는 현재 예시 구현입니다.\n"
@@ -296,13 +309,17 @@ def build_fundamental_analysis_agent(*, extra_tools: list[Any] | None = None):
     return agent
 
 
-def build_technical_analysis_agent(async_database_url: str, *, extra_tools: list[Any] | None = None):
+def build_technical_analysis_agent(
+    async_database_url: str, *, extra_tools: list[Any] | None = None
+):
     """기술적 분석 에이전트."""
     extra_tools = list(extra_tools or [])
     async_engine = create_async_engine(async_database_url, echo=False)
 
     @tool
-    async def analysis_stock(stock_code: str, runtime: ToolRuntime[AgentContext]) -> dict:
+    async def analysis_stock(
+        stock_code: str, runtime: ToolRuntime[AgentContext]
+    ) -> dict:
         """주가/시세/현재가 등을 조회합니다. (KIS 현재가 조회)"""
         user_id = runtime.context.user_id
         return await get_current_price(async_engine, user_id, stock_code)
@@ -330,7 +347,9 @@ def build_technical_analysis_agent(async_database_url: str, *, extra_tools: list
     return agent
 
 
-def build_investment_strategy_agent(async_database_url: str, *, extra_tools: list[Any] | None = None):
+def build_investment_strategy_agent(
+    async_database_url: str, *, extra_tools: list[Any] | None = None
+):
     """투자전략 에이전트.
 
     - 이번 프로젝트에서는 **실거래 주문을 실행하지 않습니다.**
@@ -356,7 +375,9 @@ def build_investment_strategy_agent(async_database_url: str, *, extra_tools: lis
         )
 
         if isinstance(account_info, str) and is_kis_token_expired_message(account_info):
-            new_token = await refresh_user_kis_access_token(async_engine, user_id, user_info)
+            new_token = await refresh_user_kis_access_token(
+                async_engine, user_id, user_info
+            )
             user_info["kis_access_token"] = new_token
             account_info = await check_account_balance(
                 user_info["kis_app_key"],
@@ -368,7 +389,9 @@ def build_investment_strategy_agent(async_database_url: str, *, extra_tools: lis
         return account_info or "There is no account information available."
 
     @tool
-    async def analysis_stock(stock_code: str, runtime: ToolRuntime[AgentContext]) -> dict:
+    async def analysis_stock(
+        stock_code: str, runtime: ToolRuntime[AgentContext]
+    ) -> dict:
         """(재사용) 현재가/시세/가격 조회 (KIS)."""
         user_id = runtime.context.user_id
         return await get_current_price(async_engine, user_id, stock_code)
@@ -380,7 +403,9 @@ def build_investment_strategy_agent(async_database_url: str, *, extra_tools: lis
         참고(개념): https://docs.langchain.com/oss/javascript/integrations/tools/openai#web-search-tool
         """
         if not os.getenv("OPENAI_API_KEY"):
-            return "OPENAI_API_KEY가 설정되어 있지 않아 Web Search를 사용할 수 없습니다."
+            return (
+                "OPENAI_API_KEY가 설정되어 있지 않아 Web Search를 사용할 수 없습니다."
+            )
 
         llm = ChatOpenAI(
             model=_model_name(),
@@ -428,7 +453,12 @@ def build_investment_strategy_agent(async_database_url: str, *, extra_tools: lis
             max_prices=max_prices,
         )
 
-    tools = [get_account_info, analysis_stock, search_news, financial_knowledge_graph_analysis] + extra_tools
+    tools = [
+        get_account_info,
+        analysis_stock,
+        search_news,
+        financial_knowledge_graph_analysis,
+    ] + extra_tools
 
     agent = create_agent(
         model=_model_name(),
@@ -549,20 +579,31 @@ JSON만 응답하세요:"""
             # JSON 추출
             import json
             import re
-            json_match = re.search(r'\{[\s\S]*\}', content)
+
+            json_match = re.search(r"\{[\s\S]*\}", content)
             if json_match:
                 return json.loads(json_match.group())
             return {
                 "primary_intent": "general",
                 "secondary_intents": [],
-                "entities": {"company_names": [], "stock_codes": [], "date_range": {}, "metrics": []},
+                "entities": {
+                    "company_names": [],
+                    "stock_codes": [],
+                    "date_range": {},
+                    "metrics": [],
+                },
                 "query_focus": question,
             }
         except Exception as e:
             return {
                 "primary_intent": "general",
                 "secondary_intents": [],
-                "entities": {"company_names": [], "stock_codes": [], "date_range": {}, "metrics": []},
+                "entities": {
+                    "company_names": [],
+                    "stock_codes": [],
+                    "date_range": {},
+                    "metrics": [],
+                },
                 "query_focus": question,
                 "error": str(e),
             }
@@ -664,7 +705,8 @@ JSON만 응답하세요:"""
             # JSON 추출
             import json
             import re
-            json_match = re.search(r'\{[\s\S]*\}', content)
+
+            json_match = re.search(r"\{[\s\S]*\}", content)
             if json_match:
                 result = json.loads(json_match.group())
                 # 기본 파라미터 추가
@@ -784,7 +826,12 @@ JSON만 응답하세요:"""
         )
 
         # Step 3: 그래프 조회
-        query_result = {"subgraph": {"node": [], "relation": []}, "context": "", "cypher": "", "error": None}
+        query_result = {
+            "subgraph": {"node": [], "relation": []},
+            "context": "",
+            "cypher": "",
+            "error": None,
+        }
 
         if cypher_info.get("cypher") and not cypher_info.get("error"):
             query_result = await execute_graph_query.func(
@@ -871,13 +918,13 @@ JSON만 응답하세요:"""
             "3. 입력에 <stock_code>/<stock_name> 태그가 있으면 그 값을 인자로 전달하세요.\n\n"
             "4. 답변 작성 규칙:\n"
             "   - 반드시 그래프 조회 결과(context)에 기반해 답변하세요.\n"
-            "   - 조회된 데이터가 없으면 \"지식그래프에서 관련 정보를 찾지 못했습니다\"라고 답하세요.\n"
+            '   - 조회된 데이터가 없으면 "지식그래프에서 관련 정보를 찾지 못했습니다"라고 답하세요.\n'
             "   - Document URL이 있으면 반드시 포함하세요.\n"
             "   - 추측이나 외부 지식 사용을 최소화하세요.\n\n"
             "5. 출력 형식 (매우 중요):\n"
             "   - 답변 텍스트에 핵심 정보를 포함하세요.\n"
             "   - **반드시** 도구 결과의 'subgraph'를 <subgraph>JSON</subgraph> 태그로 감싸서 응답 끝에 포함하세요.\n"
-            "   - 예시: <subgraph>{\"node\": [...], \"relation\": [...]}</subgraph>\n"
+            '   - 예시: <subgraph>{"node": [...], "relation": [...]}</subgraph>\n'
             "   - 이 태그는 FE에서 그래프 시각화에 사용됩니다.\n\n"
             "응답 언어: 한국어"
         ),
@@ -977,4 +1024,3 @@ def _generate_fallback_cypher(
         "parameters": params,
         "explanation": f"폴백 쿼리: {intent} 의도에 대한 기본 조회",
     }
-
