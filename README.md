@@ -1,5 +1,292 @@
 # Stockelper LLM Service
 
+Stockelper-Lab에서 **LLM 기반 채팅(SSE) + 멀티 에이전트 오케스트레이션**을 담당하는 FastAPI 서비스입니다.
+
+- **메인 엔드포인트**: `POST /stock/chat` (SSE: progress/delta/final)
+- **오케스트레이션**: `SupervisorAgent`(LangGraph) → 5개 Specialist Agent(LangChain v1 `create_agent`)
+- **외부 연동**:
+  - **Backtesting Service**: “백테스트” 요청 시 job 트리거 + 내부 API로 결과 해석 저장
+  - **Portfolio Service**: “포트폴리오 추천” 요청 시 추천 생성 트리거(채팅에서 추천 생성/출력은 하지 않음)
+  - **KIS**(옵션): 현재가/계좌 요약, 토큰 발급/갱신
+  - **Neo4j**(옵션): GraphRAG 근거 기반 답변 + FE용 `subgraph` 반환
+
+> `legacy/` 폴더는 **이전 구현 보관용**이며, 프로덕션 실행 경로(`src/`)에서는 사용하지 않습니다.
+
+---
+
+## 빠른 시작 (로컬)
+
+```bash
+uv sync --dev
+cp env.example .env
+
+# 서버 실행
+uv run python src/main.py
+
+# 헬스체크
+curl http://localhost:21009/health
+```
+
+---
+
+## Docker Compose 실행
+
+이 레포의 `docker-compose.yml`은 기본적으로 외부 네트워크 `stockelper`를 사용합니다.
+
+```bash
+docker network create stockelper
+
+# LLM 서버만
+docker-compose up -d
+
+# DB 포함
+docker-compose --profile db up -d
+
+# Neo4j 포함
+docker-compose --profile neo4j up -d
+```
+
+---
+
+## API
+
+### 1) `GET /health`
+
+헬스 체크.
+
+### 2) `POST /stock/chat` (SSE)
+
+**Request**
+
+```json
+{
+  "user_id": 1,
+  "thread_id": "thread-1",
+  "message": "삼성전자 투자전략 추천해줘",
+  "human_feedback": null
+}
+```
+
+**SSE 이벤트 타입**
+
+- `progress`: 에이전트 실행 단계
+- `delta`: 토큰 스트리밍
+- `final`: 최종 응답
+
+**최종 응답(`final`) 예시**
+
+```json
+{
+  "type": "final",
+  "message": "…",
+  "subgraph": {"node": [], "relation": []},
+  "trading_action": null,
+  "error": null
+}
+```
+
+#### 채팅 전처리 분기(중요)
+
+`/stock/chat`는 본문을 보기 전에 아래와 같은 **단순 분기**를 수행합니다.
+
+- **포트폴리오 추천 요청으로 판단되면**
+  - 포트폴리오 추천 생성 요청을 **비동기로 트리거**하고
+  - 채팅에서는 “포트폴리오 추천 페이지에서 확인” 안내만 반환합니다.
+- **백테스트 요청으로 판단되면**
+  - 백테스팅 job을 생성(트리거)하고
+  - 채팅에서는 job_id 안내 메시지를 반환합니다.
+  - 단, 플래너가 `needs_clarification/denied`를 반환하면 job 생성 없이 안내만 반환합니다.
+
+### 3) `POST /internal/backtesting/interpret`
+
+백테스트 완료 결과를 LLM으로 해석하여 `stockelper_web.backtesting`에 `analysis_md/analysis_json` 등 컬럼을 업데이트합니다.
+
+**Request**
+
+```json
+{
+  "user_id": 1,
+  "job_id": "JOB_ID",
+  "force": false
+}
+```
+
+---
+
+## 에이전트/툴 인벤토리 (프로덕션: `src/stockelper_llm/` 기준)
+
+### A) 채팅 멀티 에이전트 (Supervisor + 5 Specialist)
+
+#### 0) SupervisorAgent (오케스트레이터)
+
+- **구현**: `src/stockelper_llm/agents/supervisor.py`
+- **역할**
+  - 사용자 질의를 라우팅(어떤 Specialist를 호출할지 결정)
+  - 종목 식별(종목명↔코드)
+  - 결과 통합 및 최종 응답 구성
+  - (설계상) 주문 실행 interrupt 흐름이 있으나, 이 프로젝트의 `/stock/chat`에서는 주문 실행을 지원하지 않습니다.
+- **연결된 Tool 목록**: 없음(직접 `@tool`을 호출하는 에이전트가 아니라 오케스트레이터)
+- **연결된 하위 에이전트**: 아래 5개
+
+#### 1) MarketAnalysisAgent
+
+- **구현**: `src/stockelper_llm/agents/specialists.py` → `build_market_analysis_agent()`
+- **Tools**
+  - `search_news`: OpenAI Responses API의 `web_search_preview`로 최신 뉴스/소식 요약
+
+#### 2) FundamentalAnalysisAgent
+
+- **구현**: `src/stockelper_llm/agents/specialists.py` → `build_fundamental_analysis_agent()`
+- **Tools**
+  - `analyze_financial_statement`: 현재는 예시 구현(확장 포인트). DART 등 외부 데이터 연결은 아직 없음.
+
+#### 3) TechnicalAnalysisAgent
+
+- **구현**: `src/stockelper_llm/agents/specialists.py` → `build_technical_analysis_agent(async_database_url)`
+- **Tools**
+  - `analysis_stock`: KIS 현재가/시세 조회 (`integrations.kis.get_current_price`)
+
+#### 4) InvestmentStrategyAgent
+
+- **구현**: `src/stockelper_llm/agents/specialists.py` → `build_investment_strategy_agent(async_database_url)`
+- **Tools**
+  - `get_account_info`: 사용자 예수금/총평가 조회(`integrations.kis.check_account_balance`, 토큰 만료 시 갱신)
+  - `analysis_stock`: KIS 현재가/시세 조회
+  - `search_news`: Web Search 기반 뉴스 요약
+  - `financial_knowledge_graph_analysis`: Neo4j 서브그래프/근거 조회(폴백 포함)
+
+#### 5) GraphRAGAgent
+
+- **구현**: `src/stockelper_llm/agents/specialists.py` → `build_graph_rag_agent()`
+- **Tools**
+  - `graph_rag_pipeline`: 의도분류 → Cypher 생성 → 그래프 조회 → 컨텍스트 생성(권장)
+  - `classify_intent`: 질문 의도 분류(LLM 호출)
+  - `generate_cypher_query`: Cypher 생성(LLM 호출)
+  - `execute_graph_query`: Cypher 실행 + `subgraph/context` 구성
+  - `financial_knowledge_graph_analysis`: 레거시 호환용 직접 서브그래프 조회
+
+> Specialist 에이전트들은 모두 `extra_tools`로 Tool을 추가 주입할 수 있지만, 기본 실행에서는 위 목록만 사용합니다.
+
+### B) 요청 변환/트리거 “에이전트”(채팅 전처리에서 사용)
+
+아래 둘은 LangChain Tool 기반 agent 그래프가 아니라, **LLM structured output + 룰 기반 fallback**으로 파라미터를 안정적으로 만들고 외부 서비스 호출까지 수행하는 모듈입니다.
+
+#### 1) Backtesting Request Agent
+
+- **구현**: `src/stockelper_llm/agents/backtesting_request_agent.py`
+- **역할**
+  - 사용자 자연어 → backtesting 서버 `parameters`로 변환
+  - 안전 가드레일(기간/대상 수 등) 적용
+  - backtesting 서버에 job 생성 요청
+  - 필요 시 `needs_clarification` / `denied`로 사용자 안내 메시지 반환
+- **연결된 Tool 목록**: 없음(LLM structured output 사용)
+
+#### 2) Portfolio Request Agent
+
+- **구현**: `src/stockelper_llm/agents/portfolio_request_agent.py`
+- **역할**
+  - 사용자 자연어에서 아래 파라미터를 생성해 portfolio 서버로 전달
+    - `portfolio_size` (1~20 범위는 `/stock/chat`에서 선검증)
+    - `include_web_search` (선택)
+    - `risk_free_rate` (선택)
+  - LLM이 없으면 룰 기반 fallback
+- **연결된 Tool 목록**: 없음(LLM structured output 사용)
+
+---
+
+## 외부 통합(Integration) 모듈
+
+### KIS (`src/stockelper_llm/integrations/kis.py`)
+
+- `users` 테이블에서 `kis_app_key/kis_app_secret/kis_access_token/account_no`를 로드합니다.
+- 토큰이 없으면 발급 후 DB에 저장합니다.
+- 현재가 조회는 user가 없을 때 **환경변수 `KIS_APP_KEY/KIS_APP_SECRET`**로 fallback이 가능합니다.
+
+### Stock Listing (`src/stockelper_llm/integrations/stock_listing.py`)
+
+- KIS 종목마스터(`*.mst.zip`)를 다운로드/파싱해 종목명→종목코드 매핑을 제공합니다.
+
+### Neo4j Graph (`src/stockelper_llm/integrations/neo4j_subgraph.py`)
+
+- Cypher 실행 결과를 FE용 `subgraph(node/relation)`로 변환합니다.
+- 위험한 Cypher 키워드(삭제/갱신 등)는 차단합니다.
+
+---
+
+## 환경 변수
+
+전체 목록은 `env.example`를 기준으로 합니다. 최소 구동에 필요한 핵심만 요약합니다.
+
+### 필수(사실상)
+- `DATABASE_URL`: stockelper_web DB
+- `CHECKPOINT_DATABASE_URI`: LangGraph checkpoint DB (미지정 시 `DATABASE_URL`로 대체 시도)
+
+### LLM
+- `OPENAI_API_KEY`: 없으면 일부 기능(뉴스 검색/structured output 등)이 제한될 수 있습니다.
+- `STOCKELPER_LLM_MODEL`: 채팅/에이전트 기본 모델(기본 `gpt-5.1`)
+
+### 외부 서비스
+- `STOCKELPER_BACKTESTING_URL`: 백테스트 트리거/결과 조회에 필요
+- `STOCKELPER_PORTFOLIO_URL`: 포트폴리오 추천 트리거에 필요
+
+### Neo4j(옵션)
+- `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`
+
+---
+
+## 개발/품질 관리
+
+```bash
+# 테스트
+uv run pytest
+
+# 포맷팅
+uv run isort src tests
+uv run black src tests
+
+# 린트
+uv run ruff check src tests
+
+# 타입 체크(옵션)
+uv run mypy src
+```
+
+> 참고: 포맷/린트는 기본적으로 `legacy/`를 제외합니다.
+
+---
+
+## 프로젝트 구조(요약)
+
+```
+stockelper-llm/
+├── src/
+│   ├── main.py
+│   └── stockelper_llm/
+│       ├── webapp.py
+│       ├── multi_agent.py
+│       ├── agents/
+│       │   ├── supervisor.py
+│       │   ├── specialists.py
+│       │   ├── backtesting_request_agent.py
+│       │   └── portfolio_request_agent.py
+│       ├── integrations/
+│       │   ├── kis.py
+│       │   ├── stock_listing.py
+│       │   └── neo4j_subgraph.py
+│       └── routers/
+│           ├── base.py
+│           ├── stock.py
+│           └── backtesting.py
+├── tests/
+├── legacy/          # 보관용(프로덕션 미사용)
+├── env.example
+├── docker-compose.yml
+├── Dockerfile
+└── pyproject.toml
+```
+
+# Stockelper LLM Service
+
 > Stockelper-Lab에서 LLM 기반 “대화/분석 오케스트레이션”을 담당하는 FastAPI 서비스 (SSE 스트리밍)
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
